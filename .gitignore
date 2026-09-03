@@ -1,0 +1,14 @@
+# compiled binaries
+/bin/
+/hookline
+
+# environment variables
+.env
+
+# tests and coverage
+*.test
+coverage.out
+
+# editors
+.idea/
+.vscode/
