@@ -50,7 +50,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer rdb.Close()
+	defer func() { _ = rdb.Close() }()
 	slog.Info("redis connected")
 
 	mux := http.NewServeMux()

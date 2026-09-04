@@ -14,7 +14,7 @@ import (
 const readyTimeout = 2 * time.Second
 
 func Health() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
