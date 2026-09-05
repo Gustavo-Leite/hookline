@@ -53,49 +53,34 @@ ingestion endpoint idempotent. Those decisions are documented as they are made.
 
 - [Go 1.27+](https://go.dev/dl/)
 - Docker and Docker Compose
-- [goose](https://github.com/pressly/goose) — `go install github.com/pressly/goose/v3/cmd/goose@latest`
+
+Go and goose are needed only to work on the code — see
+[Development](#development).
 
 ### Run it
 
 ```bash
-# 1. clone
 git clone https://github.com/Gustavo-Leite/hookline.git
 cd hookline
 
-# 2. configure — the defaults work as-is for local development
-cp .env.example .env
-
-# 3. start Postgres and Redis
-docker compose up -d
-
-# 4. wait until both report healthy
-docker compose ps
-
-# 5. create the schema
-goose up
-
-# 6. run the service
-go run ./cmd/api
+cp .env.example .env    # the defaults work as-is for local use
+docker compose up -d --build
 ```
 
-Then, from another terminal:
+That is the whole setup. Compose starts Postgres and Redis, waits for both to
+report healthy, applies the pending migrations in a one-shot container, and
+only then starts the API:
 
 ```bash
 curl -s localhost:8080/healthz    # {"status":"ok"}
 curl -s localhost:8080/readyz     # {"postgres":"ok","redis":"ok"}
 ```
 
-Order matters: the service fails fast on boot if Postgres or Redis is
-unreachable, so bring the containers up first. `goose` reads its settings from
-`.env` and needs no arguments.
-
-To see readiness do its job, stop a dependency while the service is running:
-
 ```bash
-docker compose stop redis
-curl -i -s localhost:8080/readyz    # 503, redis "unavailable"
-curl -i -s localhost:8080/healthz   # 200, the process is still alive
-docker compose start redis
+docker compose ps       # what is running
+docker compose logs -f api
+docker compose down     # stop everything, keep the data
+docker compose down -v  # stop everything and wipe the database
 ```
 
 ### Configuration
@@ -110,15 +95,38 @@ Every variable lives in `.env.example`, ready to copy.
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `hookline` | Credentials used by the Postgres container |
 | `POSTGRES_PORT` | `5432` | Host port mapped to Postgres |
 | `REDIS_PORT` | `6379` | Host port mapped to Redis |
-| `DATABASE_URL` | `postgres://…@localhost:5432/…` | Connection string used by the service |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
+| `DATABASE_URL` | `postgres://…@localhost:5432/…` | Connection string, for running the service on the host |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string, same |
 | `GOOSE_DRIVER` / `GOOSE_DBSTRING` / `GOOSE_MIGRATION_DIR` | — | Read automatically by the goose CLI |
 
-`DATABASE_URL` points at `localhost` because the service runs on your machine
-while its dependencies run in containers. A process running *inside* Compose
-reaches them as `postgres` and `redis` instead.
+`DATABASE_URL` and `REDIS_URL` point at `localhost`, which is what a process on
+your machine needs. Containers reach the same services by name — `postgres` and
+`redis` — so the `api` service overrides both in `docker-compose.yml`. That way
+one `.env` serves both ways of running it, with nothing to edit when you switch.
 
 ## Development
+
+Running the service from source gives you fast rebuilds and a debugger, so keep
+only its dependencies in containers:
+
+```bash
+docker compose up -d postgres redis migrate
+go run ./cmd/api
+```
+
+`migrate` applies pending migrations and exits; you can also drive goose
+directly, which reads its settings from `.env` and needs no arguments.
+
+To watch readiness do its job, stop a dependency while the service is running:
+
+```bash
+docker compose stop redis
+curl -i -s localhost:8080/readyz    # 503, redis "unavailable"
+curl -i -s localhost:8080/healthz   # 200, the process is still alive
+docker compose start redis
+```
+
+### Checks
 
 ```bash
 go build ./...          # compile
@@ -194,6 +202,7 @@ delivery pipeline is built.
 - [x] SQL migrations with goose
 - [x] Graceful shutdown and HTTP server timeouts
 - [x] CI: build, vet, format check, lint, tests
+- [x] One `docker compose up` runs the whole stack, service included
 
 **Milestone 2 — the API**
 
@@ -216,7 +225,6 @@ delivery pipeline is built.
 - [ ] OpenAPI specification
 - [ ] Load test results (k6) published here
 - [ ] Encrypt endpoint secrets at rest
-- [ ] Single `docker compose up` runs the whole stack, service included
 
 ## License
 
