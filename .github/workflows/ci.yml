@@ -56,3 +56,34 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.13.2
+
+  compose:
+    name: docker compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: cp .env.example .env
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for readiness
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS localhost:8080/readyz; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the service never became ready"
+          exit 1
+
+      - name: Dump logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

@@ -140,7 +140,9 @@ goose up                # apply them
 goose down              # roll the last one back
 ```
 
-CI runs the same checks on every push and pull request.
+CI runs the same checks on every push and pull request, plus a smoke test that
+builds the images, brings the whole stack up with Docker Compose and asserts
+that `/readyz` answers — so the quick start above cannot silently rot.
 
 ### Project layout
 
