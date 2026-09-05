@@ -6,12 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-	goredis "github.com/redis/go-redis/v9"
 )
 
 const readyTimeout = 2 * time.Second
+
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
 
 func Health() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
@@ -19,24 +20,23 @@ func Health() http.HandlerFunc {
 	}
 }
 
-func Ready(pool *pgxpool.Pool, rdb *goredis.Client) http.HandlerFunc {
+func Ready(postgres, redis Pinger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
 		defer cancel()
 
-		checks := map[string]string{"postgres": "ok", "redis": "ok"}
+		dependencies := map[string]Pinger{"postgres": postgres, "redis": redis}
+		checks := make(map[string]string, len(dependencies))
 		status := http.StatusOK
 
-		if err := pool.Ping(ctx); err != nil {
-			slog.Error("readiness check failed", "dependency", "postgres", "error", err)
-			checks["postgres"] = "unavailable"
-			status = http.StatusServiceUnavailable
-		}
-
-		if err := rdb.Ping(ctx).Err(); err != nil {
-			slog.Error("readiness check failed", "dependency", "redis", "error", err)
-			checks["redis"] = "unavailable"
-			status = http.StatusServiceUnavailable
+		for name, dependency := range dependencies {
+			if err := dependency.Ping(ctx); err != nil {
+				slog.Error("readiness check failed", "dependency", name, "error", err)
+				checks[name] = "unavailable"
+				status = http.StatusServiceUnavailable
+				continue
+			}
+			checks[name] = "ok"
 		}
 
 		writeJSON(w, status, checks)
