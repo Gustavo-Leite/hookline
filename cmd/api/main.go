@@ -59,6 +59,11 @@ func run() error {
 	mux.Handle("GET /healthz", httpapi.Health())
 	mux.Handle("GET /readyz", httpapi.Ready(pool, rdb))
 	mux.Handle("GET /v1/me", authenticate(httpapi.Me()))
+	endpoints := httpapi.NewEndpoints(postgres.NewEndpointStore(pool))
+	mux.Handle("POST /v1/endpoints", authenticate(http.HandlerFunc(endpoints.Create)))
+	mux.Handle("GET /v1/endpoints", authenticate(http.HandlerFunc(endpoints.List)))
+	mux.Handle("GET /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Get)))
+	mux.Handle("DELETE /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Delete)))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
