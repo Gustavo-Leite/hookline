@@ -53,9 +53,12 @@ func run() error {
 	defer func() { _ = rdb.Close() }()
 	slog.Info("redis connected")
 
+	authenticate := httpapi.Authenticate(postgres.NewAPIKeyStore(pool))
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", httpapi.Health())
 	mux.Handle("GET /readyz", httpapi.Ready(pool, rdb))
+	mux.Handle("GET /v1/me", authenticate(httpapi.Me()))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
