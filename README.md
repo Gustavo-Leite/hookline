@@ -76,6 +76,31 @@ curl -s localhost:8080/healthz    # {"status":"ok"}
 curl -s localhost:8080/readyz     # {"postgres":"ok","redis":"ok"}
 ```
 
+### Get an API key
+
+Every other route requires one. There is no signup flow — the first application
+and its key are created from the command line, by whoever can reach the host:
+
+```bash
+docker compose run --rm admin create-application "my app"
+```
+
+The key is printed once and never again; only its SHA-256 hash reaches the
+database. Losing it means creating a new one.
+
+```bash
+export HOOKLINE_KEY=hl_test_...
+
+curl -s localhost:8080/v1/me -H "Authorization: Bearer $HOOKLINE_KEY"
+
+curl -s -X POST localhost:8080/v1/endpoints \
+  -H "Authorization: Bearer $HOOKLINE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/hooks","event_types":["user.created"]}'
+```
+
+The endpoint's signing secret comes back in that response, and only there.
+
 ```bash
 docker compose ps       # what is running
 docker compose logs -f api

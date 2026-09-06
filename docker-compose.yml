@@ -68,5 +68,20 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # Not started by `up`: run it on demand with
+  #   docker compose run --rm admin create-application <name>
+  admin:
+    build:
+      context: .
+      target: admin
+    profiles: ["cli"]
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   pgdata:

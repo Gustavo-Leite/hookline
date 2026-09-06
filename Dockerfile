@@ -11,6 +11,7 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/hookline-admin ./cmd/hookline-admin
 
 # ---------- build the migration runner ----------
 FROM golang:1.27-alpine AS goose-build
@@ -25,6 +26,14 @@ COPY --from=build /out/api /api
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/api"]
+
+# ---------- final: the admin CLI ----------
+FROM gcr.io/distroless/static-debian12:nonroot AS admin
+
+COPY --from=build /out/hookline-admin /hookline-admin
+
+USER nonroot:nonroot
+ENTRYPOINT ["/hookline-admin"]
 
 # ---------- final: one-shot migrations ----------
 FROM alpine:3.22 AS migrate
