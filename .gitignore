@@ -1,6 +1,7 @@
 # compiled binaries
 /bin/
 /hookline
+tmp/
 
 # environment variables
 .env
