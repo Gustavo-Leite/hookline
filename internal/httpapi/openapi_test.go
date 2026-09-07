@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Gustavo-Leite/hookline/api"
 	"github.com/Gustavo-Leite/hookline/internal/apikey"
+	"github.com/Gustavo-Leite/hookline/internal/delivery"
 	"github.com/Gustavo-Leite/hookline/internal/endpoint"
 	"github.com/Gustavo-Leite/hookline/internal/event"
 )
@@ -237,4 +239,46 @@ func TestUpdateEndpointMatchesSpec(t *testing.T) {
 	NewEndpoints(&fakeEndpointStore{}).Update(rec, req)
 
 	assertMatchesSpec(t, req, rec)
+}
+
+func TestDeliveryResponsesMatchSpec(t *testing.T) {
+	const id = "01a07478-4c52-78d4-bb1e-5a87a196f5ec"
+
+	code := 500
+	store := &fakeDeliveryStore{
+		list: []delivery.Delivery{{Status: delivery.StatusDead}},
+		attempts: []delivery.Attempt{
+			{AttemptNumber: 1, StatusCode: &code, Duration: 42 * time.Millisecond},
+		},
+	}
+	handlers := NewDeliveries(store)
+
+	t.Run("listed", func(t *testing.T) {
+		req := authenticated(specRequest(t, http.MethodGet, "/v1/deliveries?status=dead", nil))
+		rec := httptest.NewRecorder()
+
+		handlers.List(rec, req)
+
+		assertMatchesSpec(t, req, rec)
+	})
+
+	t.Run("with attempts", func(t *testing.T) {
+		req := authenticated(specRequest(t, http.MethodGet, "/v1/deliveries/"+id, nil))
+		req.SetPathValue("id", id)
+		rec := httptest.NewRecorder()
+
+		handlers.Get(rec, req)
+
+		assertMatchesSpec(t, req, rec)
+	})
+
+	t.Run("replayed", func(t *testing.T) {
+		req := authenticated(specRequest(t, http.MethodPost, "/v1/deliveries/"+id+"/replay", nil))
+		req.SetPathValue("id", id)
+		rec := httptest.NewRecorder()
+
+		handlers.Replay(rec, req)
+
+		assertMatchesSpec(t, req, rec)
+	})
 }

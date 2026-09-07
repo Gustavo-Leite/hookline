@@ -25,6 +25,8 @@ tags:
     description: Destinations that receive webhooks
   - name: Events
     description: Event ingestion
+  - name: Deliveries
+    description: What was sent, what failed, and what can be replayed
 
 security:
   - bearerAuth: []
@@ -261,6 +263,108 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/deliveries:
+    get:
+      tags: [Deliveries]
+      summary: List deliveries
+      description: |
+        One delivery exists per event per subscribed endpoint, newest first.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, succeeded, dead]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Matching deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/deliveries/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Deliveries]
+      summary: Fetch a delivery with its attempt history
+      responses:
+        "200":
+          description: The delivery and every attempt made for it
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [delivery, attempts]
+                properties:
+                  delivery:
+                    $ref: "#/components/schemas/Delivery"
+                  attempts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Attempt"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/deliveries/{id}/replay:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [Deliveries]
+      summary: Queue a delivery to be sent again
+      description: |
+        Puts the delivery back in the queue and resets its attempt counter, so a
+        dead-lettered delivery gets a full set of retries again. The attempt
+        history is kept.
+      responses:
+        "202":
+          description: The delivery was queued again
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -384,6 +488,55 @@ components:
           additionalProperties: true
           example:
             id: 42
+
+    Delivery:
+      type: object
+      required: [id, event_id, endpoint_id, status, attempt_count, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+          format: uuid
+        endpoint_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, succeeded, dead]
+        attempt_count:
+          type: integer
+        next_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    Attempt:
+      type: object
+      required: [attempt_number, duration_ms, attempted_at]
+      properties:
+        attempt_number:
+          type: integer
+        status_code:
+          type: integer
+          nullable: true
+        error:
+          type: string
+          nullable: true
+          description: Set when the request never produced a response
+        duration_ms:
+          type: integer
+        attempted_at:
+          type: string
+          format: date-time
 
     Event:
       type: object

@@ -71,6 +71,10 @@ func run() error {
 	mux.Handle("DELETE /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Delete)))
 	events := httpapi.NewEvents(postgres.NewEventStore(pool))
 	mux.Handle("POST /v1/events", authenticate(http.HandlerFunc(events.Create)))
+	deliveries := httpapi.NewDeliveries(postgres.NewDeliveryStore(pool))
+	mux.Handle("GET /v1/deliveries", authenticate(http.HandlerFunc(deliveries.List)))
+	mux.Handle("GET /v1/deliveries/{id}", authenticate(http.HandlerFunc(deliveries.Get)))
+	mux.Handle("POST /v1/deliveries/{id}/replay", authenticate(http.HandlerFunc(deliveries.Replay)))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

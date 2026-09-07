@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+	"uuid"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -101,4 +103,97 @@ func (s *DeliveryStore) RecordAttempt(ctx context.Context, outcome delivery.Atte
 	}
 
 	return nil
+}
+
+const deliveryColumns = `id, event_id, endpoint_id, application_id, status, attempt_count, next_attempt_at, completed_at, created_at, updated_at`
+
+func (s *DeliveryStore) List(ctx context.Context, applicationID uuid.UUID, status string, limit int) ([]delivery.Delivery, error) {
+	query := `
+		SELECT ` + deliveryColumns + `
+		FROM deliveries
+		WHERE application_id = $1 AND ($2 = '' OR status = $2)
+		ORDER BY created_at DESC
+		LIMIT $3`
+
+	rows, err := s.pool.Query(ctx, query, applicationID, status, limit)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: listing deliveries: %w", err)
+	}
+
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (delivery.Delivery, error) {
+		return scanDelivery(row)
+	})
+}
+
+func (s *DeliveryStore) Get(ctx context.Context, applicationID, id uuid.UUID) (delivery.Delivery, error) {
+	query := `SELECT ` + deliveryColumns + ` FROM deliveries WHERE application_id = $1 AND id = $2`
+
+	found, err := scanDelivery(s.pool.QueryRow(ctx, query, applicationID, id))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return delivery.Delivery{}, delivery.ErrNotFound
+	case err != nil:
+		return delivery.Delivery{}, fmt.Errorf("postgres: getting delivery: %w", err)
+	}
+
+	return found, nil
+}
+
+func (s *DeliveryStore) Attempts(ctx context.Context, applicationID, deliveryID uuid.UUID) ([]delivery.Attempt, error) {
+	query := `
+		SELECT a.id, a.delivery_id, a.attempt_number, a.status_code, a.error, a.duration_ms, a.attempted_at
+		FROM delivery_attempts a
+		JOIN deliveries d ON d.id = a.delivery_id
+		WHERE d.application_id = $1 AND a.delivery_id = $2
+		ORDER BY a.attempt_number`
+
+	rows, err := s.pool.Query(ctx, query, applicationID, deliveryID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: listing delivery attempts: %w", err)
+	}
+
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (delivery.Attempt, error) {
+		var (
+			attempt    delivery.Attempt
+			durationMS int64
+		)
+
+		err := row.Scan(&attempt.ID, &attempt.DeliveryID, &attempt.AttemptNumber,
+			&attempt.StatusCode, &attempt.Error, &durationMS, &attempt.AttemptedAt)
+
+		attempt.Duration = time.Duration(durationMS) * time.Millisecond
+
+		return attempt, err
+	})
+}
+
+func (s *DeliveryStore) Replay(ctx context.Context, applicationID, id uuid.UUID) (delivery.Delivery, error) {
+	query := `
+		UPDATE deliveries
+		SET status          = 'pending',
+		    attempt_count   = 0,
+		    next_attempt_at = now(),
+		    completed_at    = NULL,
+		    updated_at      = now()
+		WHERE application_id = $1 AND id = $2
+		RETURNING ` + deliveryColumns
+
+	replayed, err := scanDelivery(s.pool.QueryRow(ctx, query, applicationID, id))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return delivery.Delivery{}, delivery.ErrNotFound
+	case err != nil:
+		return delivery.Delivery{}, fmt.Errorf("postgres: replaying delivery: %w", err)
+	}
+
+	return replayed, nil
+}
+
+func scanDelivery(row scanner) (delivery.Delivery, error) {
+	var d delivery.Delivery
+
+	err := row.Scan(&d.ID, &d.EventID, &d.EndpointID, &d.ApplicationID, &d.Status,
+		&d.AttemptCount, &d.NextAttemptAt, &d.CompletedAt, &d.CreatedAt, &d.UpdatedAt)
+
+	return d, err
 }
