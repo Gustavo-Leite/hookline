@@ -10,7 +10,21 @@ services:
       - go-build-cache:/root/.cache/go-build
       - go-mod-cache:/go/pkg/mod
 
+  worker:
+    build:
+      target: dev
+    command: ["air", "-c", ".air.worker.toml"]
+    environment:
+      APP_ENV: development
+      ALLOW_PRIVATE_DELIVERY_TARGETS: ${ALLOW_PRIVATE_DELIVERY_TARGETS:-true}
+    volumes:
+      - .:/src
+      - worker-tmp:/src/tmp
+      - go-build-cache:/root/.cache/go-build
+      - go-mod-cache:/go/pkg/mod
+
 volumes:
   api-tmp:
+  worker-tmp:
   go-build-cache:
   go-mod-cache:

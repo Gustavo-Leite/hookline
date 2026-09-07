@@ -5,10 +5,10 @@ Reliable webhook delivery as a service — sign it, retry it, and never lose it.
 [![CI](https://github.com/Gustavo-Leite/hookline/actions/workflows/ci.yml/badge.svg)](https://github.com/Gustavo-Leite/hookline/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Status: in development.** Authentication, endpoint management and idempotent
-> event ingestion work today. **Delivery does not exist yet** — events are
-> accepted and stored, nothing is sent anywhere. See [Roadmap](#roadmap) for
-> exactly what is built and what is not.
+> **Status: in development.** The delivery pipeline works end to end: events are
+> accepted, fanned out to subscribed endpoints, signed, retried with backoff and
+> dead-lettered, with a full attempt history and manual replay. Rate limiting and
+> metrics are not built yet — see [Roadmap](#roadmap).
 
 ## What it is
 
@@ -39,6 +39,7 @@ ingestion endpoint idempotent. Those decisions are documented as they are made.
 | Layer | Choice |
 |---|---|
 | Language | Go 1.27 |
+| Queue | PostgreSQL with `FOR UPDATE SKIP LOCKED` |
 | HTTP | `net/http` (standard library routing) |
 | Database | PostgreSQL 18 via `pgx` |
 | Cache / rate limiting | Redis 8 |
@@ -70,8 +71,8 @@ docker compose up -d --build
 ```
 
 That is the whole setup. Compose starts Postgres and Redis, waits for both to
-report healthy, applies the pending migrations in a one-shot container, and
-only then starts the API:
+report healthy, applies the pending migrations in a one-shot container, and then
+starts the API and the delivery worker:
 
 ```bash
 curl -s localhost:8080/healthz    # {"status":"ok"}
@@ -113,11 +114,74 @@ curl -s -X POST localhost:8080/v1/endpoints \
 The endpoint's signing secret comes back in that response, and only there.
 
 ```bash
-docker compose ps       # what is running
-docker compose logs -f api
-docker compose down     # stop everything, keep the data
-docker compose down -v  # stop everything and wipe the database
+curl -s -X POST localhost:8080/v1/events \
+  -H "Authorization: Bearer $HOOKLINE_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"type":"user.created","payload":{"id":42}}'
 ```
+
+The response is `202`: the event is stored and queued, not delivered yet. The
+worker picks it up within a second, and what happened is visible here:
+
+```bash
+curl -s localhost:8080/v1/deliveries -H "Authorization: Bearer $HOOKLINE_KEY"
+curl -s localhost:8080/v1/deliveries/<id> -H "Authorization: Bearer $HOOKLINE_KEY"
+
+# send a dead-lettered delivery again, with a fresh set of retries
+curl -s -X POST localhost:8080/v1/deliveries/<id>/replay -H "Authorization: Bearer $HOOKLINE_KEY"
+```
+
+```bash
+docker compose ps            # what is running
+docker compose logs -f worker
+docker compose down          # stop everything, keep the data
+docker compose down -v       # stop everything and wipe the database
+```
+
+### Receiving webhooks
+
+Every delivery arrives as a `POST` carrying four headers:
+
+| Header | Meaning |
+|---|---|
+| `Hookline-Event-Id` | the event's id, stable across retries |
+| `Hookline-Event-Type` | what happened |
+| `Hookline-Timestamp` | when the request was signed, in Unix seconds |
+| `Hookline-Signature` | `v1,<base64 HMAC-SHA256>` |
+
+The signature covers `{event_id}.{timestamp}.{raw body}`, keyed with the
+endpoint secret. Verifying it takes a few lines in any language:
+
+```js
+const crypto = require("node:crypto");
+
+function verify(secret, headers, rawBody) {
+  const timestamp = headers["hookline-timestamp"];
+
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) {
+    return false; // outside the five-minute window: treat it as a replay
+  }
+
+  const [version, provided] = headers["hookline-signature"].split(",");
+  if (version !== "v1") return false;
+
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(`${headers["hookline-event-id"]}.${timestamp}.${rawBody}`)
+    .digest("base64");
+
+  return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+```
+
+Three things matter here. Verify against the **raw** body, before any JSON
+parsing — re-serializing changes bytes and breaks the signature. Compare in
+constant time; a plain `===` leaks how many bytes an attacker got right. And
+check the timestamp, otherwise a captured request stays valid forever.
+
+Deliveries are **at-least-once**: a receiver that times out after doing the work
+will be tried again. Use `Hookline-Event-Id` to make your handler idempotent.
 
 ### Configuration
 
@@ -134,6 +198,7 @@ Every variable lives in `.env.example`, ready to copy.
 | `DATABASE_URL` | `postgres://…@localhost:5432/…` | Connection string, for running the service on the host |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string, same |
 | `GOOSE_DRIVER` / `GOOSE_DBSTRING` / `GOOSE_MIGRATION_DIR` | — | Read automatically by the goose CLI |
+| `ALLOW_PRIVATE_DELIVERY_TARGETS` | `false` | Development only: lets the worker deliver to loopback and private addresses |
 
 `DATABASE_URL` and `REDIS_URL` point at `localhost`, which is what a process on
 your machine needs. Containers reach the same services by name — `postgres` and
@@ -197,18 +262,25 @@ that `/readyz` answers — so the quick start above cannot silently rot.
 ### Project layout
 
 ```
-cmd/api/             entry point: wires dependencies and owns the server lifecycle
+cmd/api/             the HTTP service
+cmd/worker/          the delivery worker
 cmd/hookline-admin/  creates applications and their first API key
 api/                 the OpenAPI specification, embedded into the binary
 internal/config/     environment parsing, validated at boot
 internal/apikey/     key generation, hashing and validity rules
 internal/endpoint/   webhook destinations and their signing secrets
 internal/event/      published events and their idempotency fingerprint
+internal/delivery/   signing, backoff, retry policy and the HTTP sender
+internal/worker/     the pool that drains the queue
 internal/httpapi/    HTTP handlers and middleware
-internal/postgres/   connection pool and data access
+internal/postgres/   connection pool, data access and the queue
 internal/redis/      Redis client
 migrations/          versioned SQL, applied with goose
 ```
+
+The API and the worker are separate binaries on purpose: ingestion and delivery
+have very different load profiles, and separating them means scaling one without
+the other.
 
 `internal/` is enforced by the compiler: nothing outside this module can import
 it. Packages are named after what they adapt, and interfaces are declared by
@@ -271,10 +343,51 @@ trade for a promise the caller relies on. Reusing a key with a different payload
 is a client bug, so it answers `409` rather than silently swallowing the second
 event — that is what the stored payload hash is for.
 
-**Queue backend: not decided yet.** Postgres with `FOR UPDATE SKIP LOCKED` or
-Redis Streams. This is the central architectural choice of the project and will
-be documented here — with what the losing option would have given up — once the
-delivery pipeline is built.
+**The queue is Postgres, not Redis.** This is the central choice of the project,
+and it came down to atomicity. Storing the event and queueing its deliveries
+happens in one transaction: either both exist or neither does. With Redis the
+two are separate systems, so there is a window — process dies between the insert
+and the publish — where an event is accepted and never queued. A service whose
+whole promise is "we do not lose webhooks" cannot have that window. Keeping the
+queue in the database also means the attempt history lives beside it, so
+answering *why did this delivery fail* is one query instead of a correlation
+across two systems. What it costs is throughput: `SKIP LOCKED` polls and puts
+write load on the primary, where Redis Streams would push far more messages per
+second without touching Postgres at all. At this project's scale that ceiling is
+nowhere in sight, and correctness is worth more than headroom. Redis stays for
+caching and rate limiting.
+
+**Claiming a delivery takes a lease, not a lock.** The claim query bumps
+`next_attempt_at` into the future and increments the attempt counter in the same
+statement as the `SKIP LOCKED` select. Nothing is held open while the HTTP
+request runs, and a worker that dies mid-delivery leaves a row that becomes
+claimable again when its lease expires — no reaper process, no stuck rows. The
+consequence is honest **at-least-once** semantics: a receiver that times out
+after doing the work will see the event again, which is why every delivery
+carries a stable event id.
+
+**Outbound requests are blocked from reaching private networks.** The worker
+sends HTTP to URLs the customer chooses, which is the definition of an SSRF
+primitive: point an endpoint at `169.254.169.254` and the service fetches cloud
+credentials on the attacker's behalf. Validating the URL at registration does not
+help — DNS can be repointed afterwards. The check therefore lives in the dialer's
+`Control` hook, which runs after resolution and before connect, on the address
+the connection is actually going to. Loopback, private ranges, link-local and
+multicast are refused, and redirects are not followed so the check cannot be
+side-stepped. `ALLOW_PRIVATE_DELIVERY_TARGETS` exists because otherwise the
+project cannot be demonstrated on a laptop; it defaults to off.
+
+**4xx is not retried, 5xx is.** A receiver that answers `400` has made a
+decision; repeating the request six times over six hours only burns both sides'
+resources. `408` and `429` are the exceptions — they mean *later*, not *no*. A
+request that produced no response at all is always retried, because a transport
+failure says nothing about whether the receiver could handle it.
+
+**Backoff is exponential with jitter, half fixed and half random.** When a
+customer's server goes down, every pending delivery to it fails at the same
+instant. Without jitter they all come back together and knock over the server
+that was recovering. Six attempts spread over roughly six hours, then the
+delivery is dead-lettered and waits for a human to replay it.
 
 ## Roadmap
 
@@ -296,12 +409,13 @@ delivery pipeline is built.
 - [x] Idempotent ingestion via `Idempotency-Key`
 - [x] OpenAPI specification, browsable at `/docs`
 
-**Milestone 3 — delivery**
+**Milestone 3 — delivery** ✅
 
-- [ ] Worker pool consuming the queue
-- [ ] HMAC-SHA256 signature with timestamp, replay-protected
-- [ ] Exponential backoff with jitter, then a dead-letter queue
-- [ ] Attempt history and manual replay
+- [x] Worker pool consuming the queue
+- [x] HMAC-SHA256 signature with timestamp, replay-protected
+- [x] Exponential backoff with jitter, then a dead-letter queue
+- [x] Attempt history and manual replay
+- [x] Outbound requests refuse to reach private networks
 
 **Milestone 4 — production concerns**
 

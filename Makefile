@@ -4,7 +4,7 @@ COMPOSE_DEV = docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
 dev:
 	$(COMPOSE_DEV) up -d --build
-	$(COMPOSE_DEV) logs -f api
+	$(COMPOSE_DEV) logs -f api worker
 
 up:
 	docker compose up -d --build
@@ -13,7 +13,7 @@ down:
 	docker compose down
 
 logs:
-	docker compose logs -f api
+	docker compose logs -f api worker
 
 admin:
 	docker compose run --rm admin create-application "$(name)"
