@@ -19,6 +19,7 @@ import (
 	"github.com/Gustavo-Leite/hookline/internal/postgres"
 	"github.com/Gustavo-Leite/hookline/internal/ratelimit"
 	"github.com/Gustavo-Leite/hookline/internal/redis"
+	"github.com/Gustavo-Leite/hookline/internal/secrets"
 )
 
 func main() {
@@ -34,6 +35,11 @@ func run() error {
 	_ = godotenv.Load()
 
 	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	cipher, err := secrets.NewCipher(cfg.SecretEncryptionKey)
 	if err != nil {
 		return err
 	}
@@ -74,7 +80,7 @@ func run() error {
 	route("GET /healthz", httpapi.Health())
 	route("GET /readyz", httpapi.Ready(pool, rdb))
 	route("GET /v1/me", protected(httpapi.Me()))
-	endpoints := httpapi.NewEndpoints(postgres.NewEndpointStore(pool))
+	endpoints := httpapi.NewEndpoints(postgres.NewEndpointStore(pool, cipher))
 	route("POST /v1/endpoints", protected(http.HandlerFunc(endpoints.Create)))
 	route("GET /v1/endpoints", protected(http.HandlerFunc(endpoints.List)))
 	route("GET /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Get)))
@@ -82,7 +88,7 @@ func run() error {
 	route("DELETE /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Delete)))
 	events := httpapi.NewEvents(postgres.NewEventStore(pool))
 	route("POST /v1/events", protected(http.HandlerFunc(events.Create)))
-	deliveries := httpapi.NewDeliveries(postgres.NewDeliveryStore(pool))
+	deliveries := httpapi.NewDeliveries(postgres.NewDeliveryStore(pool, cipher))
 	route("GET /v1/deliveries", protected(http.HandlerFunc(deliveries.List)))
 	route("GET /v1/deliveries/{id}", protected(http.HandlerFunc(deliveries.Get)))
 	route("POST /v1/deliveries/{id}/replay", protected(http.HandlerFunc(deliveries.Replay)))

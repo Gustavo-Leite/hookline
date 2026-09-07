@@ -3,14 +3,16 @@ package config
 import "testing"
 
 const (
-	databaseURL = "postgres://user:pass@localhost:5432/hookline?sslmode=disable"
-	redisURL    = "redis://localhost:6379/0"
+	databaseURL   = "postgres://user:pass@localhost:5432/hookline?sslmode=disable"
+	redisURL      = "redis://localhost:6379/0"
+	encryptionKey = "WBBTIkaDpmcauGBrM6xpn8tUHi+srdKPeza49X6dEao="
 )
 
 func setRequired(t *testing.T) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", databaseURL)
 	t.Setenv("REDIS_URL", redisURL)
+	t.Setenv("SECRET_ENCRYPTION_KEY", encryptionKey)
 }
 
 func TestLoadAppliesDefaults(t *testing.T) {
@@ -55,21 +57,24 @@ func TestLoadReadsEnvironment(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresConnectionStrings(t *testing.T) {
+func TestLoadRequiresItsSecrets(t *testing.T) {
 	tests := []struct {
-		name        string
-		databaseURL string
-		redisURL    string
+		name          string
+		databaseURL   string
+		redisURL      string
+		encryptionKey string
 	}{
-		{name: "missing DATABASE_URL", redisURL: redisURL},
-		{name: "missing REDIS_URL", databaseURL: databaseURL},
-		{name: "missing both"},
+		{name: "missing DATABASE_URL", redisURL: redisURL, encryptionKey: encryptionKey},
+		{name: "missing REDIS_URL", databaseURL: databaseURL, encryptionKey: encryptionKey},
+		{name: "missing SECRET_ENCRYPTION_KEY", databaseURL: databaseURL, redisURL: redisURL},
+		{name: "missing everything"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("DATABASE_URL", tt.databaseURL)
 			t.Setenv("REDIS_URL", tt.redisURL)
+			t.Setenv("SECRET_ENCRYPTION_KEY", tt.encryptionKey)
 
 			if _, err := Load(); err == nil {
 				t.Error("Load() returned no error, want one")

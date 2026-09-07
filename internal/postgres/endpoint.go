@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Gustavo-Leite/hookline/internal/endpoint"
+	"github.com/Gustavo-Leite/hookline/internal/secrets"
 )
 
 const endpointColumns = `id, application_id, url, description, secret, event_types, disabled_at, created_at, updated_at`
@@ -19,11 +20,12 @@ type scanner interface {
 }
 
 type EndpointStore struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secrets.Cipher
 }
 
-func NewEndpointStore(pool *pgxpool.Pool) *EndpointStore {
-	return &EndpointStore{pool: pool}
+func NewEndpointStore(pool *pgxpool.Pool, cipher *secrets.Cipher) *EndpointStore {
+	return &EndpointStore{pool: pool, cipher: cipher}
 }
 
 func (s *EndpointStore) Create(ctx context.Context, e endpoint.Endpoint) (endpoint.Endpoint, error) {
@@ -32,9 +34,14 @@ func (s *EndpointStore) Create(ctx context.Context, e endpoint.Endpoint) (endpoi
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING ` + endpointColumns
 
-	row := s.pool.QueryRow(ctx, query, e.ApplicationID, e.URL, e.Description, e.Secret, e.EventTypes)
+	encrypted, err := s.cipher.Encrypt(e.Secret)
+	if err != nil {
+		return endpoint.Endpoint{}, err
+	}
 
-	created, err := scanEndpoint(row)
+	row := s.pool.QueryRow(ctx, query, e.ApplicationID, e.URL, e.Description, encrypted, e.EventTypes)
+
+	created, err := s.scan(row)
 	if err != nil {
 		return endpoint.Endpoint{}, fmt.Errorf("postgres: creating endpoint: %w", err)
 	}
@@ -51,14 +58,14 @@ func (s *EndpointStore) List(ctx context.Context, applicationID uuid.UUID) ([]en
 	}
 
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (endpoint.Endpoint, error) {
-		return scanEndpoint(row)
+		return s.scan(row)
 	})
 }
 
 func (s *EndpointStore) Get(ctx context.Context, applicationID, id uuid.UUID) (endpoint.Endpoint, error) {
 	query := `SELECT ` + endpointColumns + ` FROM endpoints WHERE application_id = $1 AND id = $2`
 
-	found, err := scanEndpoint(s.pool.QueryRow(ctx, query, applicationID, id))
+	found, err := s.scan(s.pool.QueryRow(ctx, query, applicationID, id))
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return endpoint.Endpoint{}, endpoint.ErrNotFound
@@ -86,7 +93,7 @@ func (s *EndpointStore) Update(ctx context.Context, applicationID, id uuid.UUID,
 
 	row := s.pool.QueryRow(ctx, query, applicationID, id, params.URL, params.Description, params.EventTypes, params.Disabled)
 
-	updated, err := scanEndpoint(row)
+	updated, err := s.scan(row)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return endpoint.Endpoint{}, endpoint.ErrNotFound
@@ -112,13 +119,21 @@ func (s *EndpointStore) Delete(ctx context.Context, applicationID, id uuid.UUID)
 	return nil
 }
 
-func scanEndpoint(row scanner) (endpoint.Endpoint, error) {
+func (s *EndpointStore) scan(row scanner) (endpoint.Endpoint, error) {
 	var e endpoint.Endpoint
 
 	err := row.Scan(
 		&e.ID, &e.ApplicationID, &e.URL, &e.Description, &e.Secret,
 		&e.EventTypes, &e.DisabledAt, &e.CreatedAt, &e.UpdatedAt,
 	)
+	if err != nil {
+		return endpoint.Endpoint{}, err
+	}
 
-	return e, err
+	e.Secret, err = s.cipher.Decrypt(e.Secret)
+	if err != nil {
+		return endpoint.Endpoint{}, err
+	}
+
+	return e, nil
 }

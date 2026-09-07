@@ -15,9 +15,11 @@ import (
 	"github.com/Gustavo-Leite/hookline/internal/apikey"
 	"github.com/Gustavo-Leite/hookline/internal/config"
 	"github.com/Gustavo-Leite/hookline/internal/postgres"
+	"github.com/Gustavo-Leite/hookline/internal/secrets"
 )
 
 const usage = `usage:
+  hookline-admin generate-key
   hookline-admin create-application <name>
   hookline-admin list-keys <application-id>
   hookline-admin revoke-key <key-id>`
@@ -30,6 +32,17 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "generate-key" {
+		key, err := secrets.GenerateKey()
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("SECRET_ENCRYPTION_KEY=%s\n", key)
+
+		return nil
+	}
+
 	if len(os.Args) != 3 {
 		return errors.New(usage)
 	}

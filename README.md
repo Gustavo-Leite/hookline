@@ -9,8 +9,8 @@ Reliable webhook delivery as a service — sign it, retry it, and never lose it.
 > accepted, fanned out to subscribed endpoints, signed, retried with backoff and
 > dead-lettered, with a full attempt history and manual replay. Requests are rate
 > limited per API key, and both processes export Prometheus metrics with a
-> provisioned Grafana dashboard. Encrypting endpoint secrets at rest is the last
-> item still open — see [Roadmap](#roadmap).
+> provisioned Grafana dashboard, and endpoint secrets are encrypted at rest.
+> See [Roadmap](#roadmap) for what is next.
 
 ## What it is
 
@@ -112,6 +112,15 @@ and its key are created from the command line, by whoever can reach the host:
 
 ```bash
 docker compose run --rm admin create-application "my app"
+```
+
+The same CLI lists and revokes keys, and generates the encryption key the
+service needs:
+
+```bash
+docker compose run --rm admin generate-key
+docker compose run --rm admin list-keys <application-id>
+docker compose run --rm admin revoke-key <key-id>
 ```
 
 The key is printed once and never again; only its SHA-256 hash reaches the
@@ -220,6 +229,7 @@ Every variable lives in `.env.example`, ready to copy.
 | `RATE_LIMIT_BURST` | `60` | How many requests can arrive at once |
 | `METRICS_PORT` | `9090` | Port the worker exposes `/metrics` on |
 | `PROMETHEUS_PORT` / `GRAFANA_PORT` | `9090` / `3000` | Host ports for the dashboards |
+| `SECRET_ENCRYPTION_KEY` | — | **Required.** 32 random bytes, base64: `docker compose run --rm admin generate-key` |
 
 `DATABASE_URL` and `REDIS_URL` point at `localhost`, which is what a process on
 your machine needs. Containers reach the same services by name — `postgres` and
@@ -430,6 +440,19 @@ multicast are refused, and redirects are not followed so the check cannot be
 side-stepped. `ALLOW_PRIVATE_DELIVERY_TARGETS` exists because otherwise the
 project cannot be demonstrated on a laptop; it defaults to off.
 
+**Endpoint secrets are encrypted at rest with AES-256-GCM.** They cannot be
+hashed — signing every outgoing request needs the original value — so the next
+best thing is that a leaked database dump is useless without a key held
+somewhere else. GCM is authenticated, so a row edited in the database fails to
+decrypt instead of silently producing a wrong signature. A fresh random nonce per
+encryption means the same secret never produces the same ciphertext, so nobody
+can tell two endpoints share one by eyeballing the column. Stored values carry a
+`v1.` prefix: it marks the scheme for a future rotation, and it lets a value
+without the prefix be read as legacy plaintext, so turning encryption on did not
+require rewriting existing rows. The key itself is `SECRET_ENCRYPTION_KEY`, and
+the service refuses to boot without it — an optional security control is one
+that quietly ends up off.
+
 **4xx is not retried, 5xx is.** A receiver that answers `400` has made a
 decision; repeating the request six times over six hours only burns both sides'
 resources. `408` and `429` are the exceptions — they mean *later*, not *no*. A
@@ -475,7 +498,7 @@ delivery is dead-lettered and waits for a human to replay it.
 - [x] Rate limiting per API key
 - [x] Prometheus metrics and a Grafana dashboard
 - [x] Load test results (k6) published here
-- [ ] Encrypt endpoint secrets at rest
+- [x] Encrypt endpoint secrets at rest
 
 ## License
 

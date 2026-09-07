@@ -17,6 +17,7 @@ import (
 	"github.com/Gustavo-Leite/hookline/internal/delivery"
 	"github.com/Gustavo-Leite/hookline/internal/httpapi"
 	"github.com/Gustavo-Leite/hookline/internal/postgres"
+	"github.com/Gustavo-Leite/hookline/internal/secrets"
 	"github.com/Gustavo-Leite/hookline/internal/worker"
 )
 
@@ -33,6 +34,11 @@ func run() error {
 	_ = godotenv.Load()
 
 	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
+	cipher, err := secrets.NewCipher(cfg.SecretEncryptionKey)
 	if err != nil {
 		return err
 	}
@@ -72,7 +78,7 @@ func run() error {
 		}
 	}()
 
-	worker.NewPool(postgres.NewDeliveryStore(db), sender, worker.Options{}).Run(ctx)
+	worker.NewPool(postgres.NewDeliveryStore(db, cipher), sender, worker.Options{}).Run(ctx)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -18,6 +18,8 @@ type Config struct {
 	RateLimitBurst     int
 
 	MetricsPort string
+
+	SecretEncryptionKey string
 }
 
 func Load() (*Config, error) {
@@ -33,6 +35,8 @@ func Load() (*Config, error) {
 		RateLimitBurst:     getEnvInt("RATE_LIMIT_BURST", 60),
 
 		MetricsPort: getEnv("METRICS_PORT", "9090"),
+
+		SecretEncryptionKey: os.Getenv("SECRET_ENCRYPTION_KEY"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -40,6 +44,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.RedisURL == "" {
 		return nil, fmt.Errorf("config: REDIS_URL is required")
+	}
+	if cfg.SecretEncryptionKey == "" {
+		return nil, fmt.Errorf("config: SECRET_ENCRYPTION_KEY is required (generate one with: hookline-admin generate-key)")
 	}
 
 	return cfg, nil

@@ -11,14 +11,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Gustavo-Leite/hookline/internal/delivery"
+	"github.com/Gustavo-Leite/hookline/internal/secrets"
 )
 
 type DeliveryStore struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	cipher *secrets.Cipher
 }
 
-func NewDeliveryStore(pool *pgxpool.Pool) *DeliveryStore {
-	return &DeliveryStore{pool: pool}
+func NewDeliveryStore(pool *pgxpool.Pool, cipher *secrets.Cipher) *DeliveryStore {
+	return &DeliveryStore{pool: pool, cipher: cipher}
 }
 
 func (s *DeliveryStore) Claim(ctx context.Context, limit int, lease time.Duration) ([]delivery.Job, error) {
@@ -52,9 +54,17 @@ func (s *DeliveryStore) Claim(ctx context.Context, limit int, lease time.Duratio
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (delivery.Job, error) {
 		var job delivery.Job
 
-		err := row.Scan(&job.DeliveryID, &job.AttemptCount, &job.EventID, &job.EventType, &job.Payload, &job.URL, &job.Secret)
+		if err := row.Scan(&job.DeliveryID, &job.AttemptCount, &job.EventID, &job.EventType, &job.Payload, &job.URL, &job.Secret); err != nil {
+			return delivery.Job{}, err
+		}
 
-		return job, err
+		secret, err := s.cipher.Decrypt(job.Secret)
+		if err != nil {
+			return delivery.Job{}, err
+		}
+		job.Secret = secret
+
+		return job, nil
 	})
 }
 
