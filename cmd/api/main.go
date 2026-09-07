@@ -17,6 +17,7 @@ import (
 	"github.com/Gustavo-Leite/hookline/internal/config"
 	"github.com/Gustavo-Leite/hookline/internal/httpapi"
 	"github.com/Gustavo-Leite/hookline/internal/postgres"
+	"github.com/Gustavo-Leite/hookline/internal/ratelimit"
 	"github.com/Gustavo-Leite/hookline/internal/redis"
 )
 
@@ -55,6 +56,11 @@ func run() error {
 	slog.Info("redis connected")
 
 	authenticate := httpapi.Authenticate(postgres.NewAPIKeyStore(pool))
+	throttle := httpapi.RateLimit(ratelimit.New(rdb, cfg.RateLimitPerMinute, cfg.RateLimitBurst))
+
+	protected := func(next http.Handler) http.Handler {
+		return authenticate(throttle(next))
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /openapi.yaml", httpapi.OpenAPISpec(api.Spec))
@@ -62,19 +68,19 @@ func run() error {
 	mux.Handle("GET /docs/", httpapi.Docs())
 	mux.Handle("GET /healthz", httpapi.Health())
 	mux.Handle("GET /readyz", httpapi.Ready(pool, rdb))
-	mux.Handle("GET /v1/me", authenticate(httpapi.Me()))
+	mux.Handle("GET /v1/me", protected(httpapi.Me()))
 	endpoints := httpapi.NewEndpoints(postgres.NewEndpointStore(pool))
-	mux.Handle("POST /v1/endpoints", authenticate(http.HandlerFunc(endpoints.Create)))
-	mux.Handle("GET /v1/endpoints", authenticate(http.HandlerFunc(endpoints.List)))
-	mux.Handle("GET /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Get)))
-	mux.Handle("PATCH /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Update)))
-	mux.Handle("DELETE /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Delete)))
+	mux.Handle("POST /v1/endpoints", protected(http.HandlerFunc(endpoints.Create)))
+	mux.Handle("GET /v1/endpoints", protected(http.HandlerFunc(endpoints.List)))
+	mux.Handle("GET /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Get)))
+	mux.Handle("PATCH /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Update)))
+	mux.Handle("DELETE /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Delete)))
 	events := httpapi.NewEvents(postgres.NewEventStore(pool))
-	mux.Handle("POST /v1/events", authenticate(http.HandlerFunc(events.Create)))
+	mux.Handle("POST /v1/events", protected(http.HandlerFunc(events.Create)))
 	deliveries := httpapi.NewDeliveries(postgres.NewDeliveryStore(pool))
-	mux.Handle("GET /v1/deliveries", authenticate(http.HandlerFunc(deliveries.List)))
-	mux.Handle("GET /v1/deliveries/{id}", authenticate(http.HandlerFunc(deliveries.Get)))
-	mux.Handle("POST /v1/deliveries/{id}/replay", authenticate(http.HandlerFunc(deliveries.Replay)))
+	mux.Handle("GET /v1/deliveries", protected(http.HandlerFunc(deliveries.List)))
+	mux.Handle("GET /v1/deliveries/{id}", protected(http.HandlerFunc(deliveries.Get)))
+	mux.Handle("POST /v1/deliveries/{id}/replay", protected(http.HandlerFunc(deliveries.Replay)))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,

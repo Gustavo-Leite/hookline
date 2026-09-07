@@ -91,6 +91,8 @@ paths:
                     format: uuid
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /v1/endpoints:
     post:
@@ -123,6 +125,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
     get:
       tags: [Endpoints]
@@ -141,6 +145,8 @@ paths:
                       $ref: "#/components/schemas/Endpoint"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /v1/endpoints/{id}:
     parameters:
@@ -165,6 +171,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -192,6 +200,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -205,6 +215,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -250,6 +262,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "409":
           description: The idempotency key was already used with a different payload
           content:
@@ -300,6 +314,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /v1/deliveries/{id}:
     parameters:
@@ -332,6 +348,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -362,6 +380,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -375,6 +395,17 @@ components:
   responses:
     BadRequest:
       description: The request is malformed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyRequests:
+      description: The API key exceeded its request allowance
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
       content:
         application/json:
           schema:

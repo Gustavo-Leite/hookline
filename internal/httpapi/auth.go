@@ -22,6 +22,7 @@ type contextKey int
 const (
 	applicationIDKey contextKey = iota
 	requestIDKey
+	apiKeyIDKey
 )
 
 func Authenticate(keys APIKeyFinder) func(http.Handler) http.Handler {
@@ -54,6 +55,8 @@ func Authenticate(keys APIKeyFinder) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), applicationIDKey, record.ApplicationID)
+			ctx = context.WithValue(ctx, apiKeyIDKey, record.ID)
+
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -61,6 +64,11 @@ func Authenticate(keys APIKeyFinder) func(http.Handler) http.Handler {
 
 func ApplicationID(ctx context.Context) (uuid.UUID, bool) {
 	id, ok := ctx.Value(applicationIDKey).(uuid.UUID)
+	return id, ok
+}
+
+func APIKeyID(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(apiKeyIDKey).(uuid.UUID)
 	return id, ok
 }
 

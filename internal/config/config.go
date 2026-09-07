@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -12,6 +13,9 @@ type Config struct {
 	RedisURL    string
 
 	AllowPrivateDeliveryTargets bool
+
+	RateLimitPerMinute int
+	RateLimitBurst     int
 }
 
 func Load() (*Config, error) {
@@ -22,6 +26,9 @@ func Load() (*Config, error) {
 		RedisURL:    os.Getenv("REDIS_URL"),
 
 		AllowPrivateDeliveryTargets: os.Getenv("ALLOW_PRIVATE_DELIVERY_TARGETS") == "true",
+
+		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 600),
+		RateLimitBurst:     getEnvInt("RATE_LIMIT_BURST", 60),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -32,6 +39,15 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func getEnvInt(key string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || value < 1 {
+		return fallback
+	}
+
+	return value
 }
 
 func getEnv(key, fallback string) string {
