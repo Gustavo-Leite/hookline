@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/Gustavo-Leite/hookline/internal/delivery"
+	"github.com/Gustavo-Leite/hookline/internal/metrics"
 )
 
 type Queue interface {
 	Claim(ctx context.Context, limit int, lease time.Duration) ([]delivery.Job, error)
 	RecordAttempt(ctx context.Context, outcome delivery.AttemptOutcome) error
+	PendingCount(ctx context.Context) (int, error)
 }
 
 type Sender interface {
@@ -81,6 +83,10 @@ func (p *Pool) Run(ctx context.Context) {
 	slog.InfoContext(ctx, "worker pool started", "workers", p.options.Workers, "batch_size", p.options.BatchSize)
 
 	for {
+		if pending, err := p.queue.PendingCount(ctx); err == nil {
+			metrics.QueueDepth.Set(float64(pending))
+		}
+
 		claimed, err := p.queue.Claim(ctx, p.options.BatchSize, p.options.Lease)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -129,6 +135,9 @@ func (p *Pool) process(ctx context.Context, job delivery.Job) {
 		outcome.Status = delivery.StatusPending
 		outcome.NextAttemptAt = p.now().Add(p.options.Backoff.Delay(job.AttemptCount))
 	}
+
+	metrics.DeliveryAttempts.WithLabelValues(string(outcome.Status)).Inc()
+	metrics.DeliveryDuration.Observe(result.Duration.Seconds())
 
 	p.log(ctx, job, outcome)
 

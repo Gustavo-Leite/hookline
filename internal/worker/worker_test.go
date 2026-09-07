@@ -41,6 +41,13 @@ func (q *fakeQueue) Claim(_ context.Context, limit int, _ time.Duration) ([]deli
 	return claimed, nil
 }
 
+func (q *fakeQueue) PendingCount(context.Context) (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	return len(q.pending), nil
+}
+
 func (q *fakeQueue) RecordAttempt(_ context.Context, outcome delivery.AttemptOutcome) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Gustavo-Leite/hookline/internal/metrics"
 	"github.com/Gustavo-Leite/hookline/internal/ratelimit"
 )
 
@@ -38,6 +39,8 @@ func RateLimit(limiter Limiter) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+
+			metrics.RateLimited.Inc()
 
 			retryAfter := max(1, int(decision.RetryAfter.Round(time.Second)/time.Second))
 

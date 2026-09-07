@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/Gustavo-Leite/hookline/internal/config"
 	"github.com/Gustavo-Leite/hookline/internal/delivery"
+	"github.com/Gustavo-Leite/hookline/internal/httpapi"
 	"github.com/Gustavo-Leite/hookline/internal/postgres"
 	"github.com/Gustavo-Leite/hookline/internal/worker"
 )
@@ -54,7 +58,28 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	metricsServer := &http.Server{
+		Addr:              ":" + cfg.MetricsPort,
+		Handler:           httpapi.Metrics(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	go func() {
+		slog.Info("metrics server listening", "addr", metricsServer.Addr)
+
+		if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("metrics server stopped", "error", err)
+		}
+	}()
+
 	worker.NewPool(postgres.NewDeliveryStore(db), sender, worker.Options{}).Run(ctx)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("metrics server shutdown: %w", err)
+	}
 
 	slog.Info("shutdown complete")
 

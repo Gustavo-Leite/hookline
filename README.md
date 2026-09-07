@@ -7,8 +7,10 @@ Reliable webhook delivery as a service — sign it, retry it, and never lose it.
 
 > **Status: in development.** The delivery pipeline works end to end: events are
 > accepted, fanned out to subscribed endpoints, signed, retried with backoff and
-> dead-lettered, with a full attempt history and manual replay. Rate limiting and
-> metrics are not built yet — see [Roadmap](#roadmap).
+> dead-lettered, with a full attempt history and manual replay. Requests are rate
+> limited per API key, and both processes export Prometheus metrics with a
+> provisioned Grafana dashboard. Encrypting endpoint secrets at rest and the load
+> test are still open — see [Roadmap](#roadmap).
 
 ## What it is
 
@@ -46,6 +48,7 @@ ingestion endpoint idempotent. Those decisions are documented as they are made.
 | Migrations | goose (plain SQL) |
 | API docs | OpenAPI 3.0 + Swagger UI, both embedded in the binary |
 | Logging | `log/slog` (structured JSON) |
+| Metrics | Prometheus + Grafana, provisioned in Compose |
 | Lint | golangci-lint v2 |
 | CI | GitHub Actions |
 | Local infra | Docker Compose |
@@ -87,6 +90,20 @@ a form to try each one against your own instance. The raw specification is at
 client from.
 
 Swagger UI ships inside the binary, so the page needs no CDN and works offline.
+
+### Dashboards
+
+`docker compose up` also starts Prometheus and Grafana, already wired together:
+
+| | |
+|---|---|
+| <http://localhost:3000/d/hookline> | the dashboard — traffic, latency, delivery outcomes, queue depth |
+| <http://localhost:9090> | Prometheus, for ad-hoc queries |
+| `/metrics` on the API, `:9090/metrics` on the worker | the raw exposition |
+
+Grafana opens straight into the dashboard: anonymous viewing is on and the
+datasource and dashboard are provisioned from `deploy/`, so there is nothing to
+click through and no password to type.
 
 ### Get an API key
 
@@ -199,6 +216,10 @@ Every variable lives in `.env.example`, ready to copy.
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string, same |
 | `GOOSE_DRIVER` / `GOOSE_DBSTRING` / `GOOSE_MIGRATION_DIR` | — | Read automatically by the goose CLI |
 | `ALLOW_PRIVATE_DELIVERY_TARGETS` | `false` | Development only: lets the worker deliver to loopback and private addresses |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Sustained request allowance per API key |
+| `RATE_LIMIT_BURST` | `60` | How many requests can arrive at once |
+| `METRICS_PORT` | `9090` | Port the worker exposes `/metrics` on |
+| `PROMETHEUS_PORT` / `GRAFANA_PORT` | `9090` / `3000` | Host ports for the dashboards |
 
 `DATABASE_URL` and `REDIS_URL` point at `localhost`, which is what a process on
 your machine needs. Containers reach the same services by name — `postgres` and
@@ -419,8 +440,8 @@ delivery is dead-lettered and waits for a human to replay it.
 
 **Milestone 4 — production concerns**
 
-- [ ] Rate limiting per API key
-- [ ] Prometheus metrics and a Grafana dashboard
+- [x] Rate limiting per API key
+- [x] Prometheus metrics and a Grafana dashboard
 - [ ] Load test results (k6) published here
 - [ ] Encrypt endpoint secrets at rest
 

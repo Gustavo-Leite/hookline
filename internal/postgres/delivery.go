@@ -58,6 +58,17 @@ func (s *DeliveryStore) Claim(ctx context.Context, limit int, lease time.Duratio
 	})
 }
 
+func (s *DeliveryStore) PendingCount(ctx context.Context) (int, error) {
+	query := `SELECT count(*) FROM deliveries WHERE status = 'pending' AND next_attempt_at <= now()`
+
+	var pending int
+	if err := s.pool.QueryRow(ctx, query).Scan(&pending); err != nil {
+		return 0, fmt.Errorf("postgres: counting pending deliveries: %w", err)
+	}
+
+	return pending, nil
+}
+
 func (s *DeliveryStore) RecordAttempt(ctx context.Context, outcome delivery.AttemptOutcome) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

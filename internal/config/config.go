@@ -16,6 +16,8 @@ type Config struct {
 
 	RateLimitPerMinute int
 	RateLimitBurst     int
+
+	MetricsPort string
 }
 
 func Load() (*Config, error) {
@@ -29,6 +31,8 @@ func Load() (*Config, error) {
 
 		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 600),
 		RateLimitBurst:     getEnvInt("RATE_LIMIT_BURST", 60),
+
+		MetricsPort: getEnv("METRICS_PORT", "9090"),
 	}
 
 	if cfg.DatabaseURL == "" {

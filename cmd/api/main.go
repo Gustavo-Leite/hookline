@@ -63,24 +63,29 @@ func run() error {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("GET /openapi.yaml", httpapi.OpenAPISpec(api.Spec))
-	mux.Handle("GET /docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
-	mux.Handle("GET /docs/", httpapi.Docs())
-	mux.Handle("GET /healthz", httpapi.Health())
-	mux.Handle("GET /readyz", httpapi.Ready(pool, rdb))
-	mux.Handle("GET /v1/me", protected(httpapi.Me()))
+
+	route := func(pattern string, handler http.Handler) {
+		mux.Handle(pattern, httpapi.Instrument(pattern, handler))
+	}
+	mux.Handle("GET /metrics", httpapi.Metrics())
+	route("GET /openapi.yaml", httpapi.OpenAPISpec(api.Spec))
+	route("GET /docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
+	route("GET /docs/", httpapi.Docs())
+	route("GET /healthz", httpapi.Health())
+	route("GET /readyz", httpapi.Ready(pool, rdb))
+	route("GET /v1/me", protected(httpapi.Me()))
 	endpoints := httpapi.NewEndpoints(postgres.NewEndpointStore(pool))
-	mux.Handle("POST /v1/endpoints", protected(http.HandlerFunc(endpoints.Create)))
-	mux.Handle("GET /v1/endpoints", protected(http.HandlerFunc(endpoints.List)))
-	mux.Handle("GET /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Get)))
-	mux.Handle("PATCH /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Update)))
-	mux.Handle("DELETE /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Delete)))
+	route("POST /v1/endpoints", protected(http.HandlerFunc(endpoints.Create)))
+	route("GET /v1/endpoints", protected(http.HandlerFunc(endpoints.List)))
+	route("GET /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Get)))
+	route("PATCH /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Update)))
+	route("DELETE /v1/endpoints/{id}", protected(http.HandlerFunc(endpoints.Delete)))
 	events := httpapi.NewEvents(postgres.NewEventStore(pool))
-	mux.Handle("POST /v1/events", protected(http.HandlerFunc(events.Create)))
+	route("POST /v1/events", protected(http.HandlerFunc(events.Create)))
 	deliveries := httpapi.NewDeliveries(postgres.NewDeliveryStore(pool))
-	mux.Handle("GET /v1/deliveries", protected(http.HandlerFunc(deliveries.List)))
-	mux.Handle("GET /v1/deliveries/{id}", protected(http.HandlerFunc(deliveries.Get)))
-	mux.Handle("POST /v1/deliveries/{id}/replay", protected(http.HandlerFunc(deliveries.Replay)))
+	route("GET /v1/deliveries", protected(http.HandlerFunc(deliveries.List)))
+	route("GET /v1/deliveries/{id}", protected(http.HandlerFunc(deliveries.Get)))
+	route("POST /v1/deliveries/{id}/replay", protected(http.HandlerFunc(deliveries.Replay)))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
