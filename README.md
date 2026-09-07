@@ -20,6 +20,12 @@ Reliable webhook delivery as a service — sign it, retry it, and never lose it.
 **[Design decisions](#design-decisions)** ·
 **[Roadmap](#roadmap)**
 
+![The Grafana dashboard that ships with the project](docs/images/grafana.png)
+
+*`docker compose up` gives you this: ingestion rate and latency by route, delivery
+outcomes, queue depth and how long receivers take to answer. Provisioned from
+`deploy/`, no clicking required.*
+
 ## What it is
 
 Sending a webhook is easy. *Guaranteeing* it arrives is not.
@@ -147,6 +153,8 @@ a form to try each one against your own instance. The raw specification is at
 client from.
 
 Swagger UI ships inside the binary, so the page needs no CDN and works offline.
+
+![The API reference served at /docs](docs/images/swagger.png)
 
 ### Dashboards
 
