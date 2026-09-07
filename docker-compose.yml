@@ -3,7 +3,6 @@ name: hookline
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: hookline-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -22,7 +21,6 @@ services:
 
   redis:
     image: redis:8-alpine
-    container_name: hookline-redis
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
@@ -37,7 +35,6 @@ services:
     build:
       context: .
       target: migrate
-    container_name: hookline-migrate
     restart: "no"
     environment:
       GOOSE_DRIVER: postgres
@@ -50,7 +47,6 @@ services:
     build:
       context: .
       target: api
-    container_name: hookline-api
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -75,7 +71,6 @@ services:
     build:
       context: .
       target: worker
-    container_name: hookline-worker
     restart: unless-stopped
     environment:
       APP_ENV: ${APP_ENV:-production}
@@ -93,7 +88,6 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.7.3
-    container_name: hookline-prometheus
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -105,7 +99,6 @@ services:
 
   grafana:
     image: grafana/grafana:12.3.1
-    container_name: hookline-grafana
     restart: unless-stopped
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"

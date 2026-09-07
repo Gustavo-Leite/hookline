@@ -5,6 +5,7 @@ const baseURL = __ENV.BASE_URL || "http://localhost:8080";
 const apiKey = __ENV.HOOKLINE_KEY;
 
 export const options = {
+  summaryTrendStats: ["avg", "min", "med", "p(95)", "p(99)", "max"],
   stages: [
     { duration: "10s", target: 25 },
     { duration: "40s", target: 25 },

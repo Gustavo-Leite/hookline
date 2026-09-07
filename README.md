@@ -5,12 +5,20 @@ Reliable webhook delivery as a service — sign it, retry it, and never lose it.
 [![CI](https://github.com/Gustavo-Leite/hookline/actions/workflows/ci.yml/badge.svg)](https://github.com/Gustavo-Leite/hookline/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Status: in development.** The delivery pipeline works end to end: events are
-> accepted, fanned out to subscribed endpoints, signed, retried with backoff and
-> dead-lettered, with a full attempt history and manual replay. Requests are rate
-> limited per API key, and both processes export Prometheus metrics with a
-> provisioned Grafana dashboard, and endpoint secrets are encrypted at rest.
-> See [Roadmap](#roadmap) for what is next.
+> **Status: feature complete, no public instance.** Everything described below
+> runs: ingestion, fan-out, signing, retries with backoff, dead-lettering,
+> replay, rate limiting, metrics and encryption at rest. It is a portfolio
+> project — see [Deploying](#deploying) for what running it for real would take.
+
+**[What it is](#what-it-is)** ·
+**[How it works](#how-it-works)** ·
+**[Getting started](#getting-started)** ·
+**[Development](#development)** ·
+**[Load test](#load-test)** ·
+**[Security](#security)** ·
+**[Deploying](#deploying)** ·
+**[Design decisions](#design-decisions)** ·
+**[Roadmap](#roadmap)**
 
 ## What it is
 
@@ -27,6 +35,36 @@ event, and the service owns delivery from there — signing each request,
 retrying with exponential backoff, parking what it cannot deliver in a
 dead-letter queue, and keeping a full attempt history you can inspect and
 replay.
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph yours[Your application]
+        publisher([publisher])
+    end
+
+    subgraph hookline[hookline]
+        api["API<br/><small>ingestion, CRUD, replay</small>"]
+        queue[("PostgreSQL<br/><small>events, deliveries, attempts</small>")]
+        redis[("Redis<br/><small>rate limiting</small>")]
+        worker["Worker pool<br/><small>8 goroutines</small>"]
+    end
+
+    receiver([Customer endpoint])
+
+    publisher -->|"POST /v1/events"| api
+    api <-->|token bucket| redis
+    api -->|"event + one delivery per<br/>subscribed endpoint,<br/>same transaction"| queue
+    worker -->|"claim with<br/>FOR UPDATE SKIP LOCKED"| queue
+    worker -->|"POST, signed with<br/>HMAC-SHA256"| receiver
+    receiver -->|"2xx, or a retry is scheduled"| worker
+```
+
+The API answers `202` as soon as the event is durable. Everything after that —
+picking the subscribed endpoints, signing, retrying, giving up — belongs to the
+worker, and the queue between them is what lets ingestion stay fast while a
+receiver is slow or down.
 
 ## Why it exists
 
@@ -57,11 +95,18 @@ ingestion endpoint idempotent. Those decisions are documented as they are made.
 
 ### Prerequisites
 
-- [Go 1.27+](https://go.dev/dl/)
-- Docker and Docker Compose
+To **run** it, one thing:
 
-Go and goose are needed only to work on the code — see
-[Development](#development).
+- Docker 24+ with Compose v2 (`docker compose version`)
+
+To **work on the code**, two more:
+
+- [Go 1.27+](https://go.dev/dl/) — the version is pinned in `go.mod`
+- [goose](https://github.com/pressly/goose) for migrations:
+  `go install github.com/pressly/goose/v3/cmd/goose@latest`
+
+Everything else — Postgres 18, Redis 8, Prometheus, Grafana, the Go toolchain
+used for builds — runs in containers.
 
 ### Run it
 
@@ -69,9 +114,21 @@ Go and goose are needed only to work on the code — see
 git clone https://github.com/Gustavo-Leite/hookline.git
 cd hookline
 
-cp .env.example .env    # the defaults work as-is for local use
+make setup                  # writes .env with a freshly generated encryption key
 docker compose up -d --build
 ```
+
+`make setup` is `cp .env.example .env` plus one generated secret. Doing it by
+hand is the same thing:
+
+```bash
+cp .env.example .env
+docker compose run --rm admin generate-key   # paste the line into .env
+```
+
+The service refuses to start without `SECRET_ENCRYPTION_KEY`, and the example
+file ships it empty on purpose — a key committed to a public repository would
+protect nothing.
 
 That is the whole setup. Compose starts Postgres and Redis, waits for both to
 report healthy, applies the pending migrations in a one-shot container, and then
@@ -258,6 +315,9 @@ real image.
 | `make admin name="my app"` | create an application and its first API key |
 | `make down` | stop everything |
 | `make loadtest key=...` | run the k6 ingestion test |
+| `make test` / `make test-unit` | everything, or only what needs no Docker |
+| `make cover` | test coverage |
+| `make lint` / `make vuln` | golangci-lint, govulncheck |
 
 Prefer running the binary on the host? `docker compose up -d postgres redis
 migrate` brings up only the dependencies, and `go run ./cmd/api` or `air` takes
@@ -273,23 +333,42 @@ curl -i -s localhost:8080/healthz   # 200, the process is still alive
 docker compose start redis
 ```
 
-### Checks
+### Tests
 
 ```bash
-go build ./...          # compile
-go test -race ./...     # tests, with the race detector
-go vet ./...            # standard static analysis
-golangci-lint run       # full lint suite
-gofmt -l .              # anything listed here is unformatted
-
-goose status            # which migrations are pending
-goose up                # apply them
-goose down              # roll the last one back
+make test        # everything, with the race detector
+make test-unit   # only what runs without Docker
+make cover       # coverage report
 ```
 
-CI runs the same checks on every push and pull request, plus a smoke test that
-builds the images, brings the whole stack up with Docker Compose and asserts
-that `/readyz` answers — so the quick start above cannot silently rot.
+Two kinds of test, deliberately:
+
+**Unit tests** cover the parts where the logic lives — signing, backoff, the
+retry policy, idempotency fingerprints, the HTTP handlers against fake stores.
+They need nothing but Go.
+
+**Integration tests** run the SQL against a real PostgreSQL 18 that
+`testcontainers-go` starts and throws away, with the project's own migrations
+applied. That is where the queries that cannot be faked are checked: the tenant
+filter that keeps one customer from reading another's signing secret, the
+fan-out that must skip disabled and unsubscribed endpoints, `SKIP LOCKED`
+handing each delivery to exactly one of two concurrent workers, and the secret
+being unreadable in the column. They skip under `-short`.
+
+```
+internal/event      100%     internal/postgres    80%
+internal/delivery    94%     internal/ratelimit   78%
+internal/worker      93%     internal/config      77%
+internal/secrets     86%     internal/httpapi     60%
+                             internal/apikey      57%
+```
+
+The `cmd/` packages sit at 0% on purpose: they only wire dependencies together,
+and the compose smoke test in CI is what proves that wiring works.
+
+CI runs all of it on every push, plus `govulncheck` and a smoke test that builds
+the images, brings the whole stack up with Docker Compose and asserts `/readyz`
+answers — so the quick start above cannot silently rot.
 
 ### Project layout
 
@@ -333,22 +412,67 @@ make loadtest key=hl_test_...
 
 | | Without fan-out | With one subscribed endpoint |
 |---|---|---|
-| Throughput | **8 077 req/s** | **6 361 req/s** |
-| Latency avg | 2.61 ms | 3.32 ms |
-| Latency p95 | 3.44 ms | 4.58 ms |
-| Failed requests | 0 of 444 252 | 0 of 349 882 |
+| Throughput | **8 077 req/s** | **6 720 req/s** |
+| Latency avg | 2.61 ms | 3.14 ms |
+| Latency p95 | 3.44 ms | 4.21 ms |
+| Latency p99 | — | 11.16 ms |
+| Failed requests | 0 of 444 252 | 0 of 369 587 |
 
 The second column is the honest one: it includes the fan-out `INSERT` that
 creates a delivery row inside the same transaction as the event. Roughly 20% of
 the throughput buys atomicity between accepting an event and queueing it.
 
-That run left 349 882 deliveries queued, which is also the point — ingestion is
+That run left 369 587 deliveries queued, which is also the point — ingestion is
 meant to outrun delivery, and the queue is what absorbs the difference.
 
 **What this does not measure:** delivery throughput. Draining that queue means
 making hundreds of thousands of real outbound requests, which needs a receiver
 built for it. Until that exists, the number would be about whatever server was
 on the other end, not about hookline.
+
+## Security
+
+What the service does, and where it stops.
+
+| Control | How |
+|---|---|
+| API keys | 256 bits from `crypto/rand`, stored as SHA-256, compared by an index lookup |
+| Endpoint secrets | AES-256-GCM at rest, returned once at creation and never again |
+| Outgoing requests | signed with HMAC-SHA256 over `{event_id}.{timestamp}.{body}`, five-minute replay window |
+| Tenant isolation | every query filters by `application_id`, so another tenant's row is a `404` |
+| SSRF | the dialer refuses loopback, private, link-local and multicast addresses, after DNS resolution and before connect; redirects are not followed |
+| Abuse | token bucket per credential, applied **before** authentication so an invalid key cannot cost a database lookup |
+| Logs | connection errors and credentials never reach a response body; the `X-Request-Id` a client sends is length- and charset-checked before being logged |
+
+**What is not covered.** There is no user-facing signup, so there is no password
+handling, session, or CSRF surface. Rate limiting buckets unauthenticated
+callers by `RemoteAddr`; behind a proxy that becomes the proxy's address, so a
+deployment behind one needs a trusted-header configuration that does not exist
+yet. Secrets are encrypted with a single key and there is no re-encryption path,
+so rotating it invalidates what is already stored.
+
+## Deploying
+
+There is no public instance — this is a portfolio project, and running a webhook
+sender open to the internet is a liability, not a demo. Everything below is what
+it would take, and the pieces are in place for it.
+
+The images are the same ones `docker compose` builds: `api`, `worker` and
+`migrate` targets in the `Dockerfile`, each a distroless image under 21 MB
+running as a non-root user. Any platform that takes a container works —
+Fly.io, Render, ECS, a Kubernetes cluster. The API and the worker scale
+independently, and the worker holds no state, so running several is safe:
+`SKIP LOCKED` is what keeps them from colliding.
+
+**Before pointing it at real traffic:**
+
+- [ ] Generate a fresh `SECRET_ENCRYPTION_KEY` and keep it in a secret manager, not in `.env`
+- [ ] Replace `POSTGRES_PASSWORD`; the default is `change-me` for a reason
+- [ ] Leave `ALLOW_PRIVATE_DELIVERY_TARGETS` unset — it exists so the project can be demonstrated on a laptop
+- [ ] Stop publishing the Postgres and Redis ports to the host
+- [ ] Terminate TLS in front of the API
+- [ ] Point Prometheus at the two `/metrics` endpoints from outside the compose network
+- [ ] Set `APP_ENV=production` so generated keys carry the `hl_live_` prefix
 
 ## Design decisions
 
