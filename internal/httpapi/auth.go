@@ -19,7 +19,10 @@ type APIKeyFinder interface {
 
 type contextKey int
 
-const applicationIDKey contextKey = iota
+const (
+	applicationIDKey contextKey = iota
+	requestIDKey
+)
 
 func Authenticate(keys APIKeyFinder) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
