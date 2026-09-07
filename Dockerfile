@@ -13,6 +13,19 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/hookline-admin ./cmd/hookline-admin
 
+# ---------- development: hot reload, source comes from a bind mount ----------
+FROM golang:1.27-alpine AS dev
+
+WORKDIR /src
+
+RUN go install github.com/air-verse/air@v1.67.4
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+EXPOSE 8080
+CMD ["air", "-c", ".air.toml"]
+
 # ---------- build the migration runner ----------
 FROM golang:1.27-alpine AS goose-build
 

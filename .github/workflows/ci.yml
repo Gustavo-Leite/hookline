@@ -40,7 +40,7 @@ jobs:
         run: go build ./...
 
       - name: Test
-        run: go test -race ./...
+        run: make test
 
   lint:
     name: golangci-lint

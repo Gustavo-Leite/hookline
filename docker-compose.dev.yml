@@ -1,0 +1,16 @@
+services:
+  api:
+    build:
+      target: dev
+    environment:
+      APP_ENV: development
+    volumes:
+      - .:/src
+      - api-tmp:/src/tmp
+      - go-build-cache:/root/.cache/go-build
+      - go-mod-cache:/go/pkg/mod
+
+volumes:
+  api-tmp:
+  go-build-cache:
+  go-mod-cache:

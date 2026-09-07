@@ -131,16 +131,30 @@ one `.env` serves both ways of running it, with nothing to edit when you switch.
 
 ## Development
 
-Running the service from source gives you fast rebuilds and a debugger, so keep
-only its dependencies in containers:
-
 ```bash
-docker compose up -d postgres redis migrate
-go run ./cmd/api
+make dev
 ```
 
-`migrate` applies pending migrations and exits; you can also drive goose
-directly, which reads its settings from `.env` and needs no arguments.
+Same stack, except the API container rebuilds and restarts itself whenever a
+`.go` file changes, and then follows its logs. Nothing else to install: Go,
+`air` and the module cache all live inside the container.
+
+That comes from `docker-compose.dev.yml`, an overlay that swaps the compiled
+image for a development one. It is never loaded on its own, so `docker compose
+up` — the command in the quick start, and the one CI runs — still exercises the
+real image.
+
+| | |
+|---|---|
+| `make dev` | hot reload, for working on the code |
+| `make up` | the compiled image, exactly as a release runs |
+| `make admin name="my app"` | create an application and its first API key |
+| `make down` | stop everything |
+
+Prefer running the binary on the host? `docker compose up -d postgres redis
+migrate` brings up only the dependencies, and `go run ./cmd/api` or `air` takes
+it from there — just remember that the `api` container and the host process
+cannot both hold port 8080.
 
 To watch readiness do its job, stop a dependency while the service is running:
 
