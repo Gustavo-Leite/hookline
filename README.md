@@ -9,8 +9,8 @@ Reliable webhook delivery as a service — sign it, retry it, and never lose it.
 > accepted, fanned out to subscribed endpoints, signed, retried with backoff and
 > dead-lettered, with a full attempt history and manual replay. Requests are rate
 > limited per API key, and both processes export Prometheus metrics with a
-> provisioned Grafana dashboard. Encrypting endpoint secrets at rest and the load
-> test are still open — see [Roadmap](#roadmap).
+> provisioned Grafana dashboard. Encrypting endpoint secrets at rest is the last
+> item still open — see [Roadmap](#roadmap).
 
 ## What it is
 
@@ -247,6 +247,7 @@ real image.
 | `make up` | the compiled image, exactly as a release runs |
 | `make admin name="my app"` | create an application and its first API key |
 | `make down` | stop everything |
+| `make loadtest key=...` | run the k6 ingestion test |
 
 Prefer running the binary on the host? `docker compose up -d postgres redis
 migrate` brings up only the dependencies, and `go run ./cmd/api` or `air` takes
@@ -307,6 +308,37 @@ the other.
 it. Packages are named after what they adapt, and interfaces are declared by
 the code that consumes them rather than the code that implements them — so they
 stay small and easy to fake in tests.
+
+## Load test
+
+`deploy/k6/ingest.js` hammers `POST /v1/events`, the hot path. Everything —
+API, worker, Postgres, Redis — runs in Docker on one machine (Ryzen 7 5700X, 16
+threads), so these are single-box numbers, not a capacity plan.
+
+```bash
+make loadtest key=hl_test_...
+```
+
+25 virtual users, 55 seconds, rate limiting raised for the run:
+
+| | Without fan-out | With one subscribed endpoint |
+|---|---|---|
+| Throughput | **8 077 req/s** | **6 361 req/s** |
+| Latency avg | 2.61 ms | 3.32 ms |
+| Latency p95 | 3.44 ms | 4.58 ms |
+| Failed requests | 0 of 444 252 | 0 of 349 882 |
+
+The second column is the honest one: it includes the fan-out `INSERT` that
+creates a delivery row inside the same transaction as the event. Roughly 20% of
+the throughput buys atomicity between accepting an event and queueing it.
+
+That run left 349 882 deliveries queued, which is also the point — ingestion is
+meant to outrun delivery, and the queue is what absorbs the difference.
+
+**What this does not measure:** delivery throughput. Draining that queue means
+making hundreds of thousands of real outbound requests, which needs a receiver
+built for it. Until that exists, the number would be about whatever server was
+on the other end, not about hookline.
 
 ## Design decisions
 
@@ -442,7 +474,7 @@ delivery is dead-lettered and waits for a human to replay it.
 
 - [x] Rate limiting per API key
 - [x] Prometheus metrics and a Grafana dashboard
-- [ ] Load test results (k6) published here
+- [x] Load test results (k6) published here
 - [ ] Encrypt endpoint secrets at rest
 
 ## License

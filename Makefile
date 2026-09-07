@@ -1,6 +1,6 @@
 COMPOSE_DEV = docker compose -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: dev up down logs test lint fmt tidy migrate-up migrate-down migrate-status admin
+.PHONY: dev up down logs test lint fmt tidy migrate-up migrate-down migrate-status admin loadtest
 
 dev:
 	$(COMPOSE_DEV) up -d --build
@@ -17,6 +17,11 @@ logs:
 
 admin:
 	docker compose run --rm admin create-application "$(name)"
+
+loadtest:
+	docker run --rm -i --network host \
+		-e HOOKLINE_KEY="$(key)" \
+		grafana/k6:1.4.1 run - < deploy/k6/ingest.js
 
 test:
 	go test -race ./...
