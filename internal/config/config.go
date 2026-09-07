@@ -10,6 +10,8 @@ type Config struct {
 	HTTPPort    string
 	DatabaseURL string
 	RedisURL    string
+
+	AllowPrivateDeliveryTargets bool
 }
 
 func Load() (*Config, error) {
@@ -18,6 +20,8 @@ func Load() (*Config, error) {
 		HTTPPort:    getEnv("HTTP_PORT", "8080"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisURL:    os.Getenv("REDIS_URL"),
+
+		AllowPrivateDeliveryTargets: os.Getenv("ALLOW_PRIVATE_DELIVERY_TARGETS") == "true",
 	}
 
 	if cfg.DatabaseURL == "" {
