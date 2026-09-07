@@ -1,0 +1,354 @@
+openapi: 3.0.3
+
+info:
+  title: hookline
+  version: 0.1.0
+  description: |
+    Reliable webhook delivery: register endpoints, publish events, and let the
+    service own delivery — signing, retrying and dead-lettering.
+
+    Every route under `/v1` requires an API key, created from the command line
+    with `docker compose run --rm admin create-application <name>`. Send it as
+    `Authorization: Bearer hl_test_...`.
+  license:
+    name: MIT
+    url: https://github.com/Gustavo-Leite/hookline/blob/main/LICENSE
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Health
+    description: Liveness and readiness, for orchestrators
+  - name: Endpoints
+    description: Destinations that receive webhooks
+  - name: Events
+    description: Event ingestion
+
+security:
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      description: Reports that the process is alive. Touches no dependency.
+      security: []
+      responses:
+        "200":
+          description: The process is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /readyz:
+    get:
+      tags: [Health]
+      summary: Readiness probe
+      description: |
+        Reports whether the service can serve traffic, by pinging Postgres and
+        Redis under a 2s deadline. Failures are logged in full and reported as
+        `unavailable`, so connection strings never reach the response.
+      security: []
+      responses:
+        "200":
+          description: Every dependency answered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+        "503":
+          description: At least one dependency is unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Readiness"
+
+  /v1/me:
+    get:
+      tags: [Endpoints]
+      summary: Identify the caller
+      description: Returns the application the presented API key belongs to.
+      responses:
+        "200":
+          description: The key is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  application_id:
+                    type: string
+                    format: uuid
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/endpoints:
+    post:
+      tags: [Endpoints]
+      summary: Register an endpoint
+      description: |
+        Creates a destination and its signing secret. The secret is returned
+        **only here** — it is never included in any later response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EndpointCreate"
+      responses:
+        "201":
+          description: Endpoint created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Endpoint"
+                  - type: object
+                    properties:
+                      secret:
+                        type: string
+                        description: Used to verify the HMAC signature of every delivery
+                        example: whsec_tW2O_9-gAijcIHRHcLVEaU6s1R4ZR72JkaRl57Tn4Ek
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    get:
+      tags: [Endpoints]
+      summary: List endpoints
+      responses:
+        "200":
+          description: Every endpoint owned by the caller, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Endpoint"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/endpoints/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Endpoints]
+      summary: Fetch one endpoint
+      responses:
+        "200":
+          description: The endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Endpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      tags: [Endpoints]
+      summary: Remove an endpoint
+      responses:
+        "204":
+          description: Removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/events:
+    post:
+      tags: [Events]
+      summary: Publish an event
+      description: |
+        Accepts an event for delivery and answers immediately — `202`, not
+        `201`, because delivery has not happened yet.
+
+        Send `Idempotency-Key` to make retries safe. The same key with the same
+        payload returns the original event and sets `Idempotent-Replay: true`;
+        the same key with a different payload is a client bug and returns `409`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Client-chosen string, unique per application
+          schema:
+            type: string
+            example: abc-123
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventCreate"
+      responses:
+        "202":
+          description: Event accepted for delivery
+          headers:
+            Idempotent-Replay:
+              description: Present when the event already existed under this idempotency key
+              schema:
+                type: string
+                enum: ["true"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The idempotency key was already used with a different payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: The request body is larger than 256 KiB
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: An API key created with the admin CLI
+
+  responses:
+    BadRequest:
+      description: The request is malformed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing, unknown, revoked or expired API key
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: No such resource for this application
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: invalid api key
+
+    Readiness:
+      type: object
+      properties:
+        postgres:
+          type: string
+          enum: [ok, unavailable]
+        redis:
+          type: string
+          enum: [ok, unavailable]
+
+    EndpointCreate:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Must be absolute and https
+          example: https://example.com/hooks
+        description:
+          type: string
+          example: production receiver
+        event_types:
+          type: array
+          description: Event types this endpoint subscribes to. Empty means all of them.
+          items:
+            type: string
+          example: [user.created]
+
+    Endpoint:
+      type: object
+      required: [id, url, description, event_types, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          format: uri
+        description:
+          type: string
+        event_types:
+          type: array
+          items:
+            type: string
+        disabled_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    EventCreate:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          example: user.created
+        payload:
+          type: object
+          description: Any JSON value. Delivered verbatim to the subscribed endpoints.
+          additionalProperties: true
+          example:
+            id: 42
+
+    Event:
+      type: object
+      required: [id, type, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time

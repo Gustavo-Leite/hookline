@@ -13,6 +13,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"github.com/Gustavo-Leite/hookline/api"
 	"github.com/Gustavo-Leite/hookline/internal/config"
 	"github.com/Gustavo-Leite/hookline/internal/httpapi"
 	"github.com/Gustavo-Leite/hookline/internal/postgres"
@@ -56,6 +57,9 @@ func run() error {
 	authenticate := httpapi.Authenticate(postgres.NewAPIKeyStore(pool))
 
 	mux := http.NewServeMux()
+	mux.Handle("GET /openapi.yaml", httpapi.OpenAPISpec(api.Spec))
+	mux.Handle("GET /docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
+	mux.Handle("GET /docs/", httpapi.Docs())
 	mux.Handle("GET /healthz", httpapi.Health())
 	mux.Handle("GET /readyz", httpapi.Ready(pool, rdb))
 	mux.Handle("GET /v1/me", authenticate(httpapi.Me()))
