@@ -69,6 +69,34 @@ func (s *EndpointStore) Get(ctx context.Context, applicationID, id uuid.UUID) (e
 	return found, nil
 }
 
+func (s *EndpointStore) Update(ctx context.Context, applicationID, id uuid.UUID, params endpoint.UpdateParams) (endpoint.Endpoint, error) {
+	query := `
+		UPDATE endpoints SET
+			url         = COALESCE($3, url),
+			description = COALESCE($4, description),
+			event_types = COALESCE($5, event_types),
+			disabled_at = CASE
+				WHEN $6::boolean IS NULL THEN disabled_at
+				WHEN $6::boolean         THEN COALESCE(disabled_at, now())
+				ELSE NULL
+			END,
+			updated_at  = now()
+		WHERE application_id = $1 AND id = $2
+		RETURNING ` + endpointColumns
+
+	row := s.pool.QueryRow(ctx, query, applicationID, id, params.URL, params.Description, params.EventTypes, params.Disabled)
+
+	updated, err := scanEndpoint(row)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return endpoint.Endpoint{}, endpoint.ErrNotFound
+	case err != nil:
+		return endpoint.Endpoint{}, fmt.Errorf("postgres: updating endpoint: %w", err)
+	}
+
+	return updated, nil
+}
+
 func (s *EndpointStore) Delete(ctx context.Context, applicationID, id uuid.UUID) error {
 	query := `DELETE FROM endpoints WHERE application_id = $1 AND id = $2`
 

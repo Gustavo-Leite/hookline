@@ -18,6 +18,7 @@ type EndpointStore interface {
 	Create(ctx context.Context, e endpoint.Endpoint) (endpoint.Endpoint, error)
 	List(ctx context.Context, applicationID uuid.UUID) ([]endpoint.Endpoint, error)
 	Get(ctx context.Context, applicationID, id uuid.UUID) (endpoint.Endpoint, error)
+	Update(ctx context.Context, applicationID, id uuid.UUID, params endpoint.UpdateParams) (endpoint.Endpoint, error)
 	Delete(ctx context.Context, applicationID, id uuid.UUID) error
 }
 
@@ -33,6 +34,13 @@ type createEndpointRequest struct {
 	URL         string   `json:"url"`
 	Description string   `json:"description"`
 	EventTypes  []string `json:"event_types"`
+}
+
+type updateEndpointRequest struct {
+	URL         *string   `json:"url"`
+	Description *string   `json:"description"`
+	EventTypes  *[]string `json:"event_types"`
+	Disabled    *bool     `json:"disabled"`
 }
 
 type endpointResponse struct {
@@ -139,6 +147,53 @@ func (h *Endpoints) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newEndpointResponse(found))
 }
 
+func (h *Endpoints) Update(w http.ResponseWriter, r *http.Request) {
+	applicationID, id, ok := endpointTarget(w, r)
+	if !ok {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+
+	var req updateEndpointRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, "malformed json body")
+		return
+	}
+
+	params := endpoint.UpdateParams{
+		URL:         req.URL,
+		Description: req.Description,
+		EventTypes:  req.EventTypes,
+		Disabled:    req.Disabled,
+	}
+
+	if params.IsEmpty() {
+		badRequest(w, "no field to update")
+		return
+	}
+
+	if params.URL != nil {
+		if err := endpoint.ValidateURL(*params.URL); err != nil {
+			badRequest(w, err.Error())
+			return
+		}
+	}
+
+	updated, err := h.store.Update(r.Context(), applicationID, id, params)
+	switch {
+	case errors.Is(err, endpoint.ErrNotFound):
+		notFound(w)
+		return
+	case err != nil:
+		slog.ErrorContext(r.Context(), "updating endpoint", "error", err)
+		internalError(w)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newEndpointResponse(updated))
+}
+
 func (h *Endpoints) Delete(w http.ResponseWriter, r *http.Request) {
 	applicationID, id, ok := endpointTarget(w, r)
 	if !ok {
@@ -160,11 +215,16 @@ func (h *Endpoints) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func newEndpointResponse(e endpoint.Endpoint) endpointResponse {
+	eventTypes := e.EventTypes
+	if eventTypes == nil {
+		eventTypes = []string{}
+	}
+
 	return endpointResponse{
 		ID:          e.ID.String(),
 		URL:         e.URL,
 		Description: e.Description,
-		EventTypes:  e.EventTypes,
+		EventTypes:  eventTypes,
 		DisabledAt:  e.DisabledAt,
 		CreatedAt:   e.CreatedAt,
 		UpdatedAt:   e.UpdatedAt,

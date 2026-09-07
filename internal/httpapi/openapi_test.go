@@ -225,3 +225,16 @@ func TestEventResponsesMatchSpec(t *testing.T) {
 		assertMatchesSpec(t, req, rec)
 	})
 }
+
+func TestUpdateEndpointMatchesSpec(t *testing.T) {
+	const id = "01a07478-4c52-78d4-bb1e-5a87a196f5ec"
+
+	req := authenticated(specRequest(t, http.MethodPatch, "/v1/endpoints/"+id,
+		strings.NewReader(`{"disabled":true}`)))
+	req.SetPathValue("id", id)
+	rec := httptest.NewRecorder()
+
+	NewEndpoints(&fakeEndpointStore{}).Update(rec, req)
+
+	assertMatchesSpec(t, req, rec)
+}

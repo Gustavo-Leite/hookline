@@ -67,6 +67,7 @@ func run() error {
 	mux.Handle("POST /v1/endpoints", authenticate(http.HandlerFunc(endpoints.Create)))
 	mux.Handle("GET /v1/endpoints", authenticate(http.HandlerFunc(endpoints.List)))
 	mux.Handle("GET /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Get)))
+	mux.Handle("PATCH /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Update)))
 	mux.Handle("DELETE /v1/endpoints/{id}", authenticate(http.HandlerFunc(endpoints.Delete)))
 	events := httpapi.NewEvents(postgres.NewEventStore(pool))
 	mux.Handle("POST /v1/events", authenticate(http.HandlerFunc(events.Create)))

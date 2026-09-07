@@ -29,6 +29,17 @@ type Endpoint struct {
 	UpdatedAt     time.Time
 }
 
+type UpdateParams struct {
+	URL         *string
+	Description *string
+	EventTypes  *[]string
+	Disabled    *bool
+}
+
+func (p UpdateParams) IsEmpty() bool {
+	return p.URL == nil && p.Description == nil && p.EventTypes == nil && p.Disabled == nil
+}
+
 func GenerateSecret() (string, error) {
 	buf := make([]byte, secretBytes)
 	if _, err := rand.Read(buf); err != nil {

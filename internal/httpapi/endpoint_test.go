@@ -13,10 +13,12 @@ import (
 )
 
 type fakeEndpointStore struct {
-	list      []endpoint.Endpoint
-	getResult endpoint.Endpoint
-	getErr    error
-	deleteErr error
+	list           []endpoint.Endpoint
+	getResult      endpoint.Endpoint
+	getErr         error
+	updateErr      error
+	receivedUpdate endpoint.UpdateParams
+	deleteErr      error
 }
 
 func (f *fakeEndpointStore) Create(_ context.Context, e endpoint.Endpoint) (endpoint.Endpoint, error) {
@@ -30,6 +32,24 @@ func (f *fakeEndpointStore) List(context.Context, uuid.UUID) ([]endpoint.Endpoin
 
 func (f *fakeEndpointStore) Get(context.Context, uuid.UUID, uuid.UUID) (endpoint.Endpoint, error) {
 	return f.getResult, f.getErr
+}
+
+func (f *fakeEndpointStore) Update(_ context.Context, _, _ uuid.UUID, params endpoint.UpdateParams) (endpoint.Endpoint, error) {
+	f.receivedUpdate = params
+
+	if f.updateErr != nil {
+		return endpoint.Endpoint{}, f.updateErr
+	}
+
+	updated := f.getResult
+	if params.URL != nil {
+		updated.URL = *params.URL
+	}
+	if params.EventTypes != nil {
+		updated.EventTypes = *params.EventTypes
+	}
+
+	return updated, nil
 }
 
 func (f *fakeEndpointStore) Delete(context.Context, uuid.UUID, uuid.UUID) error {
@@ -118,5 +138,52 @@ func TestDeleteEndpointNotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestUpdateEndpointAppliesOnlyThePresentFields(t *testing.T) {
+	store := &fakeEndpointStore{}
+
+	body := `{"disabled":true}`
+	req := authenticated(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/v1/endpoints/x", strings.NewReader(body)))
+	req.SetPathValue("id", uuid.NewV7().String())
+	rec := httptest.NewRecorder()
+
+	NewEndpoints(store).Update(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (%s)", rec.Code, http.StatusOK, rec.Body)
+	}
+
+	if store.receivedUpdate.Disabled == nil || !*store.receivedUpdate.Disabled {
+		t.Error("disabled did not reach the store")
+	}
+
+	if store.receivedUpdate.URL != nil || store.receivedUpdate.Description != nil || store.receivedUpdate.EventTypes != nil {
+		t.Error("absent fields must stay nil so the store leaves them untouched")
+	}
+}
+
+func TestUpdateEndpointRejectsAnEmptyBody(t *testing.T) {
+	req := authenticated(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/v1/endpoints/x", strings.NewReader(`{}`)))
+	req.SetPathValue("id", uuid.NewV7().String())
+	rec := httptest.NewRecorder()
+
+	NewEndpoints(&fakeEndpointStore{}).Update(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestUpdateEndpointRejectsPlainHTTP(t *testing.T) {
+	req := authenticated(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/v1/endpoints/x", strings.NewReader(`{"url":"http://example.com"}`)))
+	req.SetPathValue("id", uuid.NewV7().String())
+	rec := httptest.NewRecorder()
+
+	NewEndpoints(&fakeEndpointStore{}).Update(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }

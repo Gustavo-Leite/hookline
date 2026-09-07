@@ -43,7 +43,37 @@ func (s *APIKeyStore) FindByHash(ctx context.Context, hash []byte) (apikey.Recor
 	return record, err
 }
 
-func scanAPIKey(row pgx.Row) (apikey.Record, error) {
+func (s *APIKeyStore) ListByApplication(ctx context.Context, applicationID uuid.UUID) ([]apikey.Record, error) {
+	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE application_id = $1 ORDER BY created_at`
+
+	rows, err := s.pool.Query(ctx, query, applicationID)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: listing api keys: %w", err)
+	}
+
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (apikey.Record, error) {
+		return scanAPIKey(row)
+	})
+}
+
+func (s *APIKeyStore) Revoke(ctx context.Context, id uuid.UUID) (apikey.Record, error) {
+	query := `
+		UPDATE api_keys SET revoked_at = COALESCE(revoked_at, now())
+		WHERE id = $1
+		RETURNING ` + apiKeyColumns
+
+	revoked, err := scanAPIKey(s.pool.QueryRow(ctx, query, id))
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return apikey.Record{}, apikey.ErrNotFound
+	case err != nil:
+		return apikey.Record{}, err
+	}
+
+	return revoked, nil
+}
+
+func scanAPIKey(row scanner) (apikey.Record, error) {
 	var r apikey.Record
 
 	err := row.Scan(
