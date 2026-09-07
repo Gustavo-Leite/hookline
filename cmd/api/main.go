@@ -21,7 +21,7 @@ import (
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	slog.SetDefault(slog.New(httpapi.NewLogHandler(slog.NewJSONHandler(os.Stdout, nil))))
 
 	if err := run(); err != nil {
 		slog.Error("startup failed", "error", err)

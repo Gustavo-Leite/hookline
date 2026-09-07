@@ -39,7 +39,7 @@ func Authenticate(keys APIKeyFinder) func(http.Handler) http.Handler {
 				deny(w, "invalid api key")
 				return
 			case err != nil:
-				slog.Error("looking up api key", "error", err)
+				slog.ErrorContext(r.Context(), "looking up api key", "error", err)
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 				return
 			}

@@ -68,7 +68,7 @@ func (h *Endpoints) Create(w http.ResponseWriter, r *http.Request) {
 
 	secret, err := endpoint.GenerateSecret()
 	if err != nil {
-		slog.Error("generating endpoint secret", "error", err)
+		slog.ErrorContext(r.Context(), "generating endpoint secret", "error", err)
 		internalError(w)
 		return
 	}
@@ -86,7 +86,7 @@ func (h *Endpoints) Create(w http.ResponseWriter, r *http.Request) {
 		EventTypes:    eventTypes,
 	})
 	if err != nil {
-		slog.Error("creating endpoint", "error", err)
+		slog.ErrorContext(r.Context(), "creating endpoint", "error", err)
 		internalError(w)
 		return
 	}
@@ -106,7 +106,7 @@ func (h *Endpoints) List(w http.ResponseWriter, r *http.Request) {
 
 	found, err := h.store.List(r.Context(), applicationID)
 	if err != nil {
-		slog.Error("listing endpoints", "error", err)
+		slog.ErrorContext(r.Context(), "listing endpoints", "error", err)
 		internalError(w)
 		return
 	}
@@ -131,7 +131,7 @@ func (h *Endpoints) Get(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	case err != nil:
-		slog.Error("getting endpoint", "error", err)
+		slog.ErrorContext(r.Context(), "getting endpoint", "error", err)
 		internalError(w)
 		return
 	}
@@ -151,7 +151,7 @@ func (h *Endpoints) Delete(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	case err != nil:
-		slog.Error("deleting endpoint", "error", err)
+		slog.ErrorContext(r.Context(), "deleting endpoint", "error", err)
 		internalError(w)
 		return
 	}

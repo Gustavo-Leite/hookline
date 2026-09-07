@@ -84,7 +84,7 @@ func (h *Events) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "idempotency key already used with a different payload"})
 		return
 	case err != nil:
-		slog.Error("creating event", "error", err)
+		slog.ErrorContext(r.Context(), "creating event", "error", err)
 		internalError(w)
 		return
 	}

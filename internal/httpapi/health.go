@@ -31,7 +31,7 @@ func Ready(postgres, redis Pinger) http.HandlerFunc {
 
 		for name, dependency := range dependencies {
 			if err := dependency.Ping(ctx); err != nil {
-				slog.Error("readiness check failed", "dependency", name, "error", err)
+				slog.ErrorContext(ctx, "readiness check failed", "dependency", name, "error", err)
 				checks[name] = "unavailable"
 				status = http.StatusServiceUnavailable
 				continue

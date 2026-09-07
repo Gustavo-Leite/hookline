@@ -43,12 +43,11 @@ func LogRequests(next http.Handler) http.Handler {
 
 		next.ServeHTTP(recorder, r)
 
-		slog.Info("request",
+		slog.InfoContext(r.Context(), "request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", recorder.status,
 			"duration_ms", time.Since(started).Milliseconds(),
-			"request_id", RequestIDFrom(r.Context()),
 		)
 	})
 }
