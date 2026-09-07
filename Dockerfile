@@ -12,6 +12,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/hookline-admin ./cmd/hookline-admin
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
 
 # ---------- development: hot reload, source comes from a bind mount ----------
 FROM golang:1.27-alpine AS dev
@@ -39,6 +40,14 @@ COPY --from=build /out/api /api
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/api"]
+
+# ---------- final: the delivery worker ----------
+FROM gcr.io/distroless/static-debian12:nonroot AS worker
+
+COPY --from=build /out/worker /worker
+
+USER nonroot:nonroot
+ENTRYPOINT ["/worker"]
 
 # ---------- final: the admin CLI ----------
 FROM gcr.io/distroless/static-debian12:nonroot AS admin

@@ -40,6 +40,14 @@ type Attempt struct {
 	AttemptedAt   time.Time
 }
 
+type AttemptOutcome struct {
+	DeliveryID    uuid.UUID
+	AttemptNumber int
+	Result        Result
+	Status        Status
+	NextAttemptAt time.Time
+}
+
 type Job struct {
 	DeliveryID   uuid.UUID
 	AttemptCount int

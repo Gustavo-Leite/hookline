@@ -68,6 +68,24 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  worker:
+    build:
+      context: .
+      target: worker
+    container_name: hookline-worker
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      ALLOW_PRIVATE_DELIVERY_TARGETS: ${ALLOW_PRIVATE_DELIVERY_TARGETS:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
   # Not started by `up`: run it on demand with
   #   docker compose run --rm admin create-application <name>
   admin:
