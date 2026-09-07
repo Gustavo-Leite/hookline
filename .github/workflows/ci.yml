@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Configure
-        run: cp .env.example .env
+        run: make setup
 
       - name: Start the stack
         run: docker compose up -d --build
