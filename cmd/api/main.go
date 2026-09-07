@@ -65,7 +65,7 @@ func run() error {
 	throttle := httpapi.RateLimit(ratelimit.New(rdb, cfg.RateLimitPerMinute, cfg.RateLimitBurst))
 
 	protected := func(next http.Handler) http.Handler {
-		return authenticate(throttle(next))
+		return throttle(authenticate(next))
 	}
 
 	mux := http.NewServeMux()

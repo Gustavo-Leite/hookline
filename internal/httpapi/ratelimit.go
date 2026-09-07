@@ -2,7 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -18,13 +21,7 @@ type Limiter interface {
 func RateLimit(limiter Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			keyID, ok := APIKeyID(r.Context())
-			if !ok {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			decision, err := limiter.Allow(r.Context(), keyID.String())
+			decision, err := limiter.Allow(r.Context(), rateLimitKey(r))
 			if err != nil {
 				slog.ErrorContext(r.Context(), "rate limiting unavailable, letting the request through", "error", err)
 				next.ServeHTTP(w, r)
@@ -48,4 +45,18 @@ func RateLimit(limiter Limiter) func(http.Handler) http.Handler {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
 		})
 	}
+}
+
+func rateLimitKey(r *http.Request) string {
+	if token, ok := bearerToken(r); ok {
+		sum := sha256.Sum256([]byte(token))
+		return "key:" + hex.EncodeToString(sum[:8])
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+
+	return "ip:" + host
 }

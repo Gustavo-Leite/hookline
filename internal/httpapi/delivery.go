@@ -92,7 +92,7 @@ func (h *Deliveries) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Deliveries) Get(w http.ResponseWriter, r *http.Request) {
-	applicationID, id, ok := endpointTarget(w, r)
+	applicationID, id, ok := resourceTarget(w, r)
 	if !ok {
 		return
 	}
@@ -100,7 +100,7 @@ func (h *Deliveries) Get(w http.ResponseWriter, r *http.Request) {
 	found, err := h.store.Get(r.Context(), applicationID, id)
 	switch {
 	case errors.Is(err, delivery.ErrNotFound):
-		notFound(w)
+		notFound(w, "delivery")
 		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "getting delivery", "error", err)
@@ -133,7 +133,7 @@ func (h *Deliveries) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Deliveries) Replay(w http.ResponseWriter, r *http.Request) {
-	applicationID, id, ok := endpointTarget(w, r)
+	applicationID, id, ok := resourceTarget(w, r)
 	if !ok {
 		return
 	}
@@ -141,7 +141,7 @@ func (h *Deliveries) Replay(w http.ResponseWriter, r *http.Request) {
 	replayed, err := h.store.Replay(r.Context(), applicationID, id)
 	switch {
 	case errors.Is(err, delivery.ErrNotFound):
-		notFound(w)
+		notFound(w, "delivery")
 		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "replaying delivery", "error", err)

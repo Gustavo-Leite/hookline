@@ -43,6 +43,14 @@ func (s *APIKeyStore) FindByHash(ctx context.Context, hash []byte) (apikey.Recor
 	return record, err
 }
 
+func (s *APIKeyStore) TouchLastUsed(ctx context.Context, id uuid.UUID) error {
+	if _, err := s.pool.Exec(ctx, `UPDATE api_keys SET last_used_at = now() WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("postgres: recording api key usage: %w", err)
+	}
+
+	return nil
+}
+
 func (s *APIKeyStore) ListByApplication(ctx context.Context, applicationID uuid.UUID) ([]apikey.Record, error) {
 	query := `SELECT ` + apiKeyColumns + ` FROM api_keys WHERE application_id = $1 ORDER BY created_at`
 

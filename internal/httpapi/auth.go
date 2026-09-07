@@ -13,19 +13,21 @@ import (
 	"github.com/Gustavo-Leite/hookline/internal/apikey"
 )
 
-type APIKeyFinder interface {
+type APIKeyStore interface {
 	FindByHash(ctx context.Context, hash []byte) (apikey.Record, error)
+	TouchLastUsed(ctx context.Context, id uuid.UUID) error
 }
+
+const lastUsedInterval = 5 * time.Minute
 
 type contextKey int
 
 const (
 	applicationIDKey contextKey = iota
 	requestIDKey
-	apiKeyIDKey
 )
 
-func Authenticate(keys APIKeyFinder) func(http.Handler) http.Handler {
+func Authenticate(keys APIKeyStore) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := bearerToken(r)
@@ -54,10 +56,9 @@ func Authenticate(keys APIKeyFinder) func(http.Handler) http.Handler {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), applicationIDKey, record.ApplicationID)
-			ctx = context.WithValue(ctx, apiKeyIDKey, record.ID)
+			recordUsage(r.Context(), keys, record)
 
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), applicationIDKey, record.ApplicationID)))
 		})
 	}
 }
@@ -67,9 +68,19 @@ func ApplicationID(ctx context.Context) (uuid.UUID, bool) {
 	return id, ok
 }
 
-func APIKeyID(ctx context.Context) (uuid.UUID, bool) {
-	id, ok := ctx.Value(apiKeyIDKey).(uuid.UUID)
-	return id, ok
+func recordUsage(ctx context.Context, keys APIKeyStore, record apikey.Record) {
+	if record.LastUsedAt != nil && time.Since(*record.LastUsedAt) < lastUsedInterval {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+
+		if err := keys.TouchLastUsed(ctx, record.ID); err != nil {
+			slog.ErrorContext(ctx, "recording api key usage", "error", err)
+		}
+	}()
 }
 
 func bearerToken(r *http.Request) (string, bool) {

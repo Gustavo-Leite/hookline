@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,13 +13,16 @@ import (
 )
 
 type fakeLimiter struct {
-	decision ratelimit.Decision
-	err      error
-	calls    int
+	decision     ratelimit.Decision
+	err          error
+	calls        int
+	receivedKeys []string
 }
 
-func (f *fakeLimiter) Allow(context.Context, string) (ratelimit.Decision, error) {
+func (f *fakeLimiter) Allow(_ context.Context, key string) (ratelimit.Decision, error) {
 	f.calls++
+	f.receivedKeys = append(f.receivedKeys, key)
+
 	return f.decision, f.err
 }
 
@@ -83,20 +87,46 @@ func TestRateLimitFailsOpenWhenRedisIsDown(t *testing.T) {
 	}
 }
 
-func TestRateLimitIgnoresUnauthenticatedRequests(t *testing.T) {
-	limiter := &fakeLimiter{}
+func TestRateLimitCountsUnauthenticatedRequests(t *testing.T) {
+	limiter := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
 
 	var reached bool
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/me", nil)
+	req.RemoteAddr = "203.0.113.7:54321"
 
 	RateLimit(limiter)(okHandler(&reached)).ServeHTTP(rec, req)
 
-	if limiter.calls != 0 {
-		t.Error("an unauthenticated request consumed an allowance")
+	if limiter.calls != 1 {
+		t.Fatalf("the limiter was called %d times, want 1", limiter.calls)
+	}
+
+	if got := limiter.receivedKeys[0]; got != "ip:203.0.113.7" {
+		t.Errorf("bucket = %q, want it keyed by the peer address", got)
 	}
 
 	if !reached {
-		t.Error("an unauthenticated request was blocked")
+		t.Error("an allowed request was blocked")
+	}
+}
+
+func TestRateLimitBucketsByCredentialNotByIdentity(t *testing.T) {
+	limiter := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
+
+	var reached bool
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer hl_test_whatever")
+
+	RateLimit(limiter)(okHandler(&reached)).ServeHTTP(rec, req)
+
+	key := limiter.receivedKeys[0]
+
+	if !strings.HasPrefix(key, "key:") {
+		t.Errorf("bucket = %q, want it keyed by the presented credential", key)
+	}
+
+	if strings.Contains(key, "hl_test_whatever") {
+		t.Error("the bucket key contains the raw credential")
 	}
 }

@@ -128,7 +128,7 @@ func (h *Endpoints) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Endpoints) Get(w http.ResponseWriter, r *http.Request) {
-	applicationID, id, ok := endpointTarget(w, r)
+	applicationID, id, ok := resourceTarget(w, r)
 	if !ok {
 		return
 	}
@@ -136,7 +136,7 @@ func (h *Endpoints) Get(w http.ResponseWriter, r *http.Request) {
 	found, err := h.store.Get(r.Context(), applicationID, id)
 	switch {
 	case errors.Is(err, endpoint.ErrNotFound):
-		notFound(w)
+		notFound(w, "endpoint")
 		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "getting endpoint", "error", err)
@@ -148,7 +148,7 @@ func (h *Endpoints) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Endpoints) Update(w http.ResponseWriter, r *http.Request) {
-	applicationID, id, ok := endpointTarget(w, r)
+	applicationID, id, ok := resourceTarget(w, r)
 	if !ok {
 		return
 	}
@@ -183,7 +183,7 @@ func (h *Endpoints) Update(w http.ResponseWriter, r *http.Request) {
 	updated, err := h.store.Update(r.Context(), applicationID, id, params)
 	switch {
 	case errors.Is(err, endpoint.ErrNotFound):
-		notFound(w)
+		notFound(w, "endpoint")
 		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "updating endpoint", "error", err)
@@ -195,7 +195,7 @@ func (h *Endpoints) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Endpoints) Delete(w http.ResponseWriter, r *http.Request) {
-	applicationID, id, ok := endpointTarget(w, r)
+	applicationID, id, ok := resourceTarget(w, r)
 	if !ok {
 		return
 	}
@@ -203,7 +203,7 @@ func (h *Endpoints) Delete(w http.ResponseWriter, r *http.Request) {
 	err := h.store.Delete(r.Context(), applicationID, id)
 	switch {
 	case errors.Is(err, endpoint.ErrNotFound):
-		notFound(w)
+		notFound(w, "endpoint")
 		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "deleting endpoint", "error", err)
@@ -231,7 +231,7 @@ func newEndpointResponse(e endpoint.Endpoint) endpointResponse {
 	}
 }
 
-func endpointTarget(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
+func resourceTarget(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, bool) {
 	applicationID, ok := ApplicationID(r.Context())
 	if !ok {
 		internalError(w)
@@ -240,15 +240,15 @@ func endpointTarget(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUI
 
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
-		badRequest(w, "invalid endpoint id")
+		badRequest(w, "invalid id")
 		return uuid.Nil(), uuid.Nil(), false
 	}
 
 	return applicationID, id, true
 }
 
-func notFound(w http.ResponseWriter) {
-	writeJSON(w, http.StatusNotFound, map[string]string{"error": "endpoint not found"})
+func notFound(w http.ResponseWriter, resource string) {
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": resource + " not found"})
 }
 
 func badRequest(w http.ResponseWriter, reason string) {

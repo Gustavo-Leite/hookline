@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -97,13 +98,17 @@ func assertMatchesSpec(t *testing.T, req *http.Request, rec *httptest.ResponseRe
 	}
 }
 
-type fakeAPIKeyFinder struct {
+type fakeAPIKeyStore struct {
 	record apikey.Record
 	err    error
 }
 
-func (f fakeAPIKeyFinder) FindByHash(context.Context, []byte) (apikey.Record, error) {
+func (f fakeAPIKeyStore) FindByHash(context.Context, []byte) (apikey.Record, error) {
 	return f.record, f.err
+}
+
+func (f fakeAPIKeyStore) TouchLastUsed(context.Context, uuid.UUID) error {
+	return nil
 }
 
 func TestHealthMatchesSpec(t *testing.T) {
@@ -149,7 +154,7 @@ func TestUnauthorizedMatchesSpec(t *testing.T) {
 	req := specRequest(t, http.MethodGet, "/v1/me", nil)
 	rec := httptest.NewRecorder()
 
-	Authenticate(fakeAPIKeyFinder{err: apikey.ErrNotFound})(Me()).ServeHTTP(rec, req)
+	Authenticate(fakeAPIKeyStore{err: apikey.ErrNotFound})(Me()).ServeHTTP(rec, req)
 
 	assertMatchesSpec(t, req, rec)
 }

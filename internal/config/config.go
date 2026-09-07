@@ -23,6 +23,16 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
+	rateLimitPerMinute, err := getEnvInt("RATE_LIMIT_PER_MINUTE", 600)
+	if err != nil {
+		return nil, err
+	}
+
+	rateLimitBurst, err := getEnvInt("RATE_LIMIT_BURST", 60)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		AppEnv:      getEnv("APP_ENV", "development"),
 		HTTPPort:    getEnv("HTTP_PORT", "8080"),
@@ -31,8 +41,8 @@ func Load() (*Config, error) {
 
 		AllowPrivateDeliveryTargets: os.Getenv("ALLOW_PRIVATE_DELIVERY_TARGETS") == "true",
 
-		RateLimitPerMinute: getEnvInt("RATE_LIMIT_PER_MINUTE", 600),
-		RateLimitBurst:     getEnvInt("RATE_LIMIT_BURST", 60),
+		RateLimitPerMinute: rateLimitPerMinute,
+		RateLimitBurst:     rateLimitBurst,
 
 		MetricsPort: getEnv("METRICS_PORT", "9090"),
 
@@ -52,13 +62,18 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-func getEnvInt(key string, fallback int) int {
-	value, err := strconv.Atoi(os.Getenv(key))
-	if err != nil || value < 1 {
-		return fallback
+func getEnvInt(key string, fallback int) (int, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
 	}
 
-	return value
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 0, fmt.Errorf("config: %s must be a positive integer, got %q", key, raw)
+	}
+
+	return value, nil
 }
 
 func getEnv(key, fallback string) string {

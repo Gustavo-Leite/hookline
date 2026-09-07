@@ -57,10 +57,7 @@ func (f *fakeEndpointStore) Delete(context.Context, uuid.UUID, uuid.UUID) error 
 }
 
 func authenticated(r *http.Request) *http.Request {
-	ctx := context.WithValue(r.Context(), applicationIDKey, uuid.NewV7())
-	ctx = context.WithValue(ctx, apiKeyIDKey, uuid.NewV7())
-
-	return r.WithContext(ctx)
+	return r.WithContext(context.WithValue(r.Context(), applicationIDKey, uuid.NewV7()))
 }
 
 func TestCreateEndpointReturnsTheSecret(t *testing.T) {

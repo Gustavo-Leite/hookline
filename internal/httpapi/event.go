@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -62,8 +63,14 @@ func (h *Events) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Payload) == 0 {
+	payload := bytes.TrimSpace(req.Payload)
+	if len(payload) == 0 {
 		badRequest(w, "payload is required")
+		return
+	}
+
+	if payload[0] != '{' {
+		badRequest(w, "payload must be a json object")
 		return
 	}
 
@@ -75,9 +82,9 @@ func (h *Events) Create(w http.ResponseWriter, r *http.Request) {
 	created, replayed, err := h.store.Create(r.Context(), event.Event{
 		ApplicationID:  applicationID,
 		Type:           req.Type,
-		Payload:        req.Payload,
+		Payload:        payload,
 		IdempotencyKey: idempotencyKey,
-		PayloadHash:    event.HashPayload(req.Type, req.Payload),
+		PayloadHash:    event.HashPayload(req.Type, payload),
 	})
 	switch {
 	case errors.Is(err, event.ErrIdempotencyKeyReused):

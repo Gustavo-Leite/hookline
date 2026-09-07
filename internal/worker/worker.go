@@ -27,6 +27,7 @@ type Options struct {
 	Lease        time.Duration
 	MaxAttempts  int
 	Backoff      delivery.Backoff
+	QueueReport  time.Duration
 }
 
 type Pool struct {
@@ -55,6 +56,9 @@ func NewPool(queue Queue, sender Sender, options Options) *Pool {
 	if options.Backoff.Random == nil {
 		options.Backoff = delivery.DefaultBackoff()
 	}
+	if options.QueueReport <= 0 {
+		options.QueueReport = 15 * time.Second
+	}
 
 	return &Pool{queue: queue, sender: sender, options: options, now: time.Now}
 }
@@ -82,9 +86,15 @@ func (p *Pool) Run(ctx context.Context) {
 
 	slog.InfoContext(ctx, "worker pool started", "workers", p.options.Workers, "batch_size", p.options.BatchSize)
 
+	var reportedAt time.Time
+
 	for {
-		if pending, err := p.queue.PendingCount(ctx); err == nil {
-			metrics.QueueDepth.Set(float64(pending))
+		if p.now().Sub(reportedAt) >= p.options.QueueReport {
+			if pending, err := p.queue.PendingCount(ctx); err == nil {
+				metrics.QueueDepth.Set(float64(pending))
+			}
+
+			reportedAt = p.now()
 		}
 
 		claimed, err := p.queue.Claim(ctx, p.options.BatchSize, p.options.Lease)
