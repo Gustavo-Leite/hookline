@@ -5,9 +5,10 @@ Reliable webhook delivery as a service — sign it, retry it, and never lose it.
 [![CI](https://github.com/Gustavo-Leite/hookline/actions/workflows/ci.yml/badge.svg)](https://github.com/Gustavo-Leite/hookline/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Status: early development.** The service boots, connects to its dependencies
-> and reports health. Event ingestion and delivery are not implemented yet — see
-> [Roadmap](#roadmap) for exactly what exists and what does not.
+> **Status: in development.** Authentication, endpoint management and idempotent
+> event ingestion work today. **Delivery does not exist yet** — events are
+> accepted and stored, nothing is sent anywhere. See [Roadmap](#roadmap) for
+> exactly what is built and what is not.
 
 ## What it is
 
@@ -42,6 +43,7 @@ ingestion endpoint idempotent. Those decisions are documented as they are made.
 | Database | PostgreSQL 18 via `pgx` |
 | Cache / rate limiting | Redis 8 |
 | Migrations | goose (plain SQL) |
+| API docs | OpenAPI 3.0 + Swagger UI, both embedded in the binary |
 | Logging | `log/slog` (structured JSON) |
 | Lint | golangci-lint v2 |
 | CI | GitHub Actions |
@@ -75,6 +77,15 @@ only then starts the API:
 curl -s localhost:8080/healthz    # {"status":"ok"}
 curl -s localhost:8080/readyz     # {"postgres":"ok","redis":"ok"}
 ```
+
+### API reference
+
+Open **<http://localhost:8080/docs>** — every route, schema and error code, with
+a form to try each one against your own instance. The raw specification is at
+`/openapi.yaml`, ready to import into Postman or Insomnia, or to generate a
+client from.
+
+Swagger UI ships inside the binary, so the page needs no CDN and works offline.
 
 ### Get an API key
 
@@ -186,12 +197,17 @@ that `/readyz` answers — so the quick start above cannot silently rot.
 ### Project layout
 
 ```
-cmd/api/            entry point: wires dependencies and owns the server lifecycle
-internal/config/    environment parsing, validated at boot
-internal/httpapi/   HTTP handlers and middleware
-internal/postgres/  connection pool and data access
-internal/redis/     Redis client
-migrations/         versioned SQL, applied with goose
+cmd/api/             entry point: wires dependencies and owns the server lifecycle
+cmd/hookline-admin/  creates applications and their first API key
+api/                 the OpenAPI specification, embedded into the binary
+internal/config/     environment parsing, validated at boot
+internal/apikey/     key generation, hashing and validity rules
+internal/endpoint/   webhook destinations and their signing secrets
+internal/event/      published events and their idempotency fingerprint
+internal/httpapi/    HTTP handlers and middleware
+internal/postgres/   connection pool and data access
+internal/redis/      Redis client
+migrations/          versioned SQL, applied with goose
 ```
 
 `internal/` is enforced by the compiler: nothing outside this module can import
@@ -228,6 +244,33 @@ says `"unavailable"`; the log holds the actual error. Connection errors carry
 hosts, ports and sometimes usernames, and that does not belong in an HTTP
 response body.
 
+**API keys are hashed with SHA-256, not bcrypt.** bcrypt is the right answer for
+passwords, which humans choose badly and reuse everywhere: a slow hash is what
+makes a leaked table survive a dictionary attack. An API key is 256 bits from
+`crypto/rand`, so there is no dictionary and no reuse, and a slow hash buys
+nothing against an attack that is already impossible. It costs plenty, though —
+the key is verified on every request, and bcrypt embeds a random salt, so the
+hash is not deterministic and therefore not indexable. Authenticating would mean
+scanning the table and running bcrypt per row. With SHA-256 the lookup is a
+single index hit on a unique constraint, and since the index does the comparing,
+there is no timing side channel to worry about either.
+
+**Tenant isolation lives in SQL, not in the handlers.** Every endpoint query
+filters by `application_id`, including the ones that already receive an id.
+Checking ownership in the handler instead is how IDOR bugs are born — and here
+the leaked field would be the endpoint's signing secret. As written, another
+tenant's endpoint does not exist: the response is `404`, which also avoids
+confirming that the id is real.
+
+**Idempotency is a unique index, not a Redis key.** A partial unique index on
+`(application_id, idempotency_key)` makes duplicates impossible even when two
+requests race across replicas, and `INSERT ... ON CONFLICT DO NOTHING RETURNING`
+resolves it in one round trip with no read-then-write window. Redis would be
+faster and would lose the guarantee on an eviction or a failover, which is a bad
+trade for a promise the caller relies on. Reusing a key with a different payload
+is a client bug, so it answers `409` rather than silently swallowing the second
+event — that is what the stored payload hash is for.
+
 **Queue backend: not decided yet.** Postgres with `FOR UPDATE SKIP LOCKED` or
 Redis Streams. This is the central architectural choice of the project and will
 be documented here — with what the losing option would have given up — once the
@@ -245,12 +288,13 @@ delivery pipeline is built.
 - [x] CI: build, vet, format check, lint, tests
 - [x] One `docker compose up` runs the whole stack, service included
 
-**Milestone 2 — the API**
+**Milestone 2 — the API** ✅
 
-- [ ] API key authentication, stored hashed
-- [ ] CRUD for endpoints
-- [ ] `POST /events` — fast ingestion, `202 Accepted`
-- [ ] Idempotent ingestion via `Idempotency-Key`
+- [x] API key authentication, stored hashed
+- [x] CRUD for endpoints
+- [x] `POST /events` — fast ingestion, `202 Accepted`
+- [x] Idempotent ingestion via `Idempotency-Key`
+- [x] OpenAPI specification, browsable at `/docs`
 
 **Milestone 3 — delivery**
 
@@ -263,7 +307,6 @@ delivery pipeline is built.
 
 - [ ] Rate limiting per API key
 - [ ] Prometheus metrics and a Grafana dashboard
-- [ ] OpenAPI specification
 - [ ] Load test results (k6) published here
 - [ ] Encrypt endpoint secrets at rest
 
